@@ -1,0 +1,3 @@
+conn: 'host=localhost port=5432 dbname=avito_moderation user=vagrigorevaaa'
+dir: .
+baseline: 0
