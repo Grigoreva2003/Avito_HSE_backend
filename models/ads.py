@@ -19,6 +19,11 @@ class AdRequest(BaseModel):
         return v
 
 
+class SimplePredictRequest(BaseModel):
+    """Модель запроса для simple_predict (только item_id)."""
+    item_id: int = Field(..., gt=0, description="ID объявления")
+
+
 class PredictResponse(BaseModel):
     """Модель ответа с предсказанием модели."""
     is_violation: bool = Field(..., description="Есть ли нарушение в объявлении")
