@@ -3,55 +3,25 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 from http import HTTPStatus
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from ml import get_model_manager
 import numpy as np
-from model import train_model
-
-
-@pytest.fixture
-def app_client() -> TestClient:
-    """Фикстура для тестового клиента"""
-    # Убеждаемся, что модель загружена перед запуском тестов
-    if not hasattr(app.state, 'model') or app.state.model is None:
-        app.state.model = train_model()
-    return TestClient(app)
-
-
-def make_payload(overrides: dict | None = None) -> dict:
-    """Создает тестовый payload с возможностью переопределения полей"""
-    payload = {
-        "seller_id": 1,
-        "is_verified_seller": True,
-        "item_id": 100,
-        "name": "Товар",
-        "description": "Описание",
-        "category": 1,
-        "images_qty": 1,
-    }
-    if overrides:
-        payload.update(overrides)
-    return payload
 
 
 class TestSuccessfulPredictionViolation:
     """Тест успешного предсказания (is_violation = True)"""
 
-    def test_predict_violation_true(self, app_client: TestClient):
+    def test_predict_violation_true(self, app_client: TestClient, make_payload):
         """
         Тест предсказания с нарушением.
-        Используем мок для гарантированного получения is_violation=True
+        Мокаем ModelManager для гарантированного получения is_violation=True
         """
-        # Создаем мок модели, которая возвращает нарушение
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([1])  # 1 = нарушение
-        mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])  # 80% вероятность нарушения
-
-        # Сохраняем оригинальную модель
-        original_model = app.state.model
-        try:
-            # Подменяем модель на мок
-            app.state.model = mock_model
-
+        # Мокаем метод predict у ModelManager
+        with patch.object(
+            get_model_manager(),
+            'predict',
+            return_value=(True, 0.8)  # is_violation=True, probability=0.8
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload({
@@ -70,34 +40,25 @@ class TestSuccessfulPredictionViolation:
 
             # Проверяем, что модель предсказала нарушение
             assert data["is_violation"] is True
+            assert data["probability"] == 0.8
             assert isinstance(data["probability"], float)
             assert 0.0 <= data["probability"] <= 1.0
-
-            # Проверяем, что модель была вызвана
-            assert mock_model.predict.called
-            assert mock_model.predict_proba.called
-        finally:
-            # Восстанавливаем оригинальную модель
-            app.state.model = original_model
 
 
 class TestSuccessfulPredictionNoViolation:
     """Тест успешного предсказания (is_violation = False)"""
 
-    def test_predict_violation_false(self, app_client: TestClient):
+    def test_predict_violation_false(self, app_client: TestClient, make_payload):
         """
         Тест предсказания без нарушения.
-        Используем мок для гарантированного получения is_violation=False
+        Мокаем ModelManager для гарантированного получения is_violation=False
         """
-        # Создаем мок модели, которая возвращает отсутствие нарушения
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([0])  # 0 = нет нарушения
-        mock_model.predict_proba.return_value = np.array([[0.9, 0.1]])  # 10% вероятность нарушения
-
-        original_model = app.state.model
-        try:
-            app.state.model = mock_model
-
+        # Мокаем метод predict у ModelManager
+        with patch.object(
+            get_model_manager(),
+            'predict',
+            return_value=(False, 0.1)  # is_violation=False, probability=0.1
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload({
@@ -114,13 +75,9 @@ class TestSuccessfulPredictionNoViolation:
             assert "probability" in data
 
             assert data["is_violation"] is False
+            assert data["probability"] == 0.1
             assert isinstance(data["probability"], float)
             assert 0.0 <= data["probability"] <= 1.0
-
-            assert mock_model.predict.called
-            assert mock_model.predict_proba.called
-        finally:
-            app.state.model = original_model
 
 
 class TestValidation:
@@ -151,6 +108,7 @@ class TestValidation:
     def test_invalid_types(
         self,
         app_client: TestClient,
+        make_payload,
         field: str,
         value: Any,
     ):
@@ -184,6 +142,7 @@ class TestValidation:
     def test_missing_required_field(
         self,
         app_client: TestClient,
+        make_payload,
         missing_field: str,
     ):
         """
@@ -195,7 +154,7 @@ class TestValidation:
         response = app_client.post("/predict", json=data)
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
-    def test_negative_images_qty(self, app_client: TestClient):
+    def test_negative_images_qty(self, app_client: TestClient, make_payload):
         """Тест валидации: отрицательное количество изображений"""
         response = app_client.post(
             "/predict",
@@ -203,7 +162,7 @@ class TestValidation:
         )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
-    def test_empty_name(self, app_client: TestClient):
+    def test_empty_name(self, app_client: TestClient, make_payload):
         """Тест валидации: пустое название"""
         response = app_client.post(
             "/predict",
@@ -211,7 +170,7 @@ class TestValidation:
         )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
-    def test_empty_description(self, app_client: TestClient):
+    def test_empty_description(self, app_client: TestClient, make_payload):
         """Тест валидации: пустое описание"""
         response = app_client.post(
             "/predict",
@@ -223,17 +182,17 @@ class TestValidation:
 class TestModelUnavailable:
     """Тест обработки ошибки при недоступной модели"""
 
-    def test_model_not_loaded_returns_503(self, app_client: TestClient):
+    def test_model_not_loaded_returns_503(self, app_client: TestClient, make_payload):
         """
         Тест обработки ошибки: проверяет, что API возвращает 503 Service Unavailable,
         когда модель недоступна
         """
-        original_model = getattr(app.state, 'model', None)
-
-        try:
-            # Устанавливаем модель в None, имитируя ее недоступность
-            app.state.model = None
-
+        # Мокаем is_available чтобы вернуть False (модель недоступна)
+        with patch.object(
+            get_model_manager(),
+            'is_available',
+            return_value=False
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload(),
@@ -247,23 +206,17 @@ class TestModelUnavailable:
             assert "detail" in data
             assert "модель" in data["detail"].lower() or "model" in data["detail"].lower()
 
-        finally:
-            if original_model is not None:
-                app.state.model = original_model
-
-    def test_model_prediction_error_returns_500(self, app_client: TestClient):
+    def test_model_prediction_error_returns_500(self, app_client: TestClient, make_payload):
         """
         Тест обработки ошибки: проверяет, что API возвращает 500 Internal Server Error,
         когда модель выбрасывает исключение при предсказании
         """
-        # Создаем мок модели, которая выбрасывает исключение
-        mock_model = MagicMock()
-        mock_model.predict.side_effect = Exception("Ошибка модели")
-
-        original_model = app.state.model
-        try:
-            app.state.model = mock_model
-
+        # Мокаем predict чтобы выбросить исключение
+        with patch.object(
+            get_model_manager(),
+            'predict',
+            side_effect=Exception("Ошибка модели")
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload(),
@@ -275,23 +228,18 @@ class TestModelUnavailable:
             # Проверяем, что есть сообщение об ошибке
             data = response.json()
             assert "detail" in data
-        finally:
-            app.state.model = original_model
 
 
 class TestModelIntegration:
     """Дополнительные интеграционные тесты для проверки работы модели"""
 
-    def test_model_returns_valid_response_structure(self, app_client: TestClient):
+    def test_model_returns_valid_response_structure(self, app_client: TestClient, make_payload):
         """Проверка, что ответ модели имеет правильную структуру"""
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([0])
-        mock_model.predict_proba.return_value = np.array([[0.7, 0.3]])
-
-        original_model = app.state.model
-        try:
-            app.state.model = mock_model
-
+        with patch.object(
+            get_model_manager(),
+            'predict',
+            return_value=(False, 0.3)  # is_violation=False, probability=0.3
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload(),
@@ -309,20 +257,15 @@ class TestModelIntegration:
 
             # Проверяем диапазон вероятности
             assert 0.0 <= data["probability"] <= 1.0
-        finally:
-            app.state.model = original_model
 
-    def test_probability_matches_prediction(self, app_client: TestClient):
+    def test_probability_matches_prediction(self, app_client: TestClient, make_payload):
         """Проверка, что вероятность соответствует предсказанию"""
         # Высокая вероятность нарушения
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([1])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9]])
-
-        original_model = app.state.model
-        try:
-            app.state.model = mock_model
-
+        with patch.object(
+            get_model_manager(),
+            'predict',
+            return_value=(True, 0.9)  # is_violation=True, probability=0.9
+        ):
             response = app_client.post(
                 "/predict",
                 json=make_payload(),
@@ -331,8 +274,6 @@ class TestModelIntegration:
             data = response.json()
             assert data["is_violation"] is True
             assert data["probability"] == 0.9
-        finally:
-            app.state.model = original_model
 
 
 if __name__ == "__main__":

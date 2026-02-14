@@ -1,0 +1,13 @@
+class ServiceException(Exception):
+    """Базовое исключение для сервисного слоя"""
+    pass
+
+
+class ModelNotAvailableError(ServiceException):
+    """Исключение, когда ML-модель недоступна"""
+    pass
+
+
+class PredictionError(ServiceException):
+    """Исключение при ошибке предсказания"""
+    pass

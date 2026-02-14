@@ -1,10 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from routers.users import router as user_router, root_router
 from routers.ads import router as ads_router
 import uvicorn
 import logging
-from model import get_or_create_model
+from ml import get_model_manager
 
 # Настройка логирования
 logging.basicConfig(
@@ -18,24 +17,23 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Управление жизненным циклом приложения.
-    Загружает модель при старте и освобождает ресурсы при завершении.
+    Инициализирует ModelManager (синглтон) при старте.
     """
-    # Startup: загрузка модели
-    logger.info("Запуск приложения: загрузка ML-модели...")
+    # Startup: инициализация ModelManager
+    logger.info("Запуск приложения: инициализация ModelManager...")
     try:
-        model = get_or_create_model("model.pkl")
-        app.state.model = model
-        logger.info("ML-модель успешно загружена и готова к использованию")
+        model_manager = get_model_manager()
+        model_manager.load_model("model.pkl")
+        logger.info("ModelManager успешно инициализирован, модель готова к использованию")
     except Exception as e:
-        logger.error(f"Ошибка при загрузке модели: {e}")
-        app.state.model = None
+        logger.error(f"Ошибка при инициализации ModelManager: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown: освобождение ресурсов
     logger.info("Завершение работы приложения...")
-    app.state.model = None
+    model_manager.unload()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -45,8 +43,6 @@ async def root():
     return {'message': 'Hello World'}
 
 
-app.include_router(root_router)
-app.include_router(user_router, prefix='/users')
 app.include_router(ads_router, tags=["Ads"])
 
 
