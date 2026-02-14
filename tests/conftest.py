@@ -1,7 +1,10 @@
 import pytest
+import asyncio
 from fastapi.testclient import TestClient
 from main import app
 from ml import get_model_manager
+from database import get_database
+from repositories import SellerRepository, AdRepository
 
 
 @pytest.fixture
@@ -31,3 +34,39 @@ def make_payload():
             payload.update(overrides)
         return payload
     return _make_payload
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Создает event loop для асинхронных тестов"""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database(event_loop):
+    """
+    Подключение к БД перед тестами и отключение после.
+    """
+    db = get_database()
+    
+    # Подключаемся к БД
+    event_loop.run_until_complete(db.connect())
+    
+    yield db
+    
+    # Отключаемся от БД
+    event_loop.run_until_complete(db.disconnect())
+
+
+@pytest.fixture
+def seller_repository():
+    """Фикстура для репозитория продавцов"""
+    return SellerRepository()
+
+
+@pytest.fixture
+def ad_repository():
+    """Фикстура для репозитория объявлений"""
+    return AdRepository()

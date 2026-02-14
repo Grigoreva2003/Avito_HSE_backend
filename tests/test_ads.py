@@ -276,5 +276,223 @@ class TestModelIntegration:
             assert data["probability"] == 0.9
 
 
+class TestSimplePredictViolation:
+    """Тесты для /simple_predict с положительным результатом"""
+
+    def test_simple_predict_violation_true(self, app_client: TestClient):
+        """
+        Тест /simple_predict с нарушением (is_violation=True).
+        Мокаем получение объявления из БД и предсказание модели.
+        """
+        # Мокаем репозиторий для возврата объявления
+        from repositories.ads import Ad
+        mock_ad = Ad(
+            id=100,
+            seller_id=1,
+            name="Test Ad",
+            description="Short description",
+            category=1,
+            images_qty=0,
+            seller_is_verified=False
+        )
+        
+        with patch('repositories.AdRepository.get_by_id', return_value=mock_ad):
+            # Мокаем предсказание модели
+            with patch.object(
+                get_model_manager(),
+                'predict',
+                return_value=(True, 0.85)
+            ):
+                response = app_client.post(
+                    "/simple_predict",
+                    json={"item_id": 100}
+                )
+                
+                assert response.status_code == HTTPStatus.OK
+                data = response.json()
+                
+                assert "is_violation" in data
+                assert "probability" in data
+                assert data["is_violation"] is True
+                assert data["probability"] == 0.85
+
+
+class TestSimplePredictNoViolation:
+    """Тесты для /simple_predict с отрицательным результатом"""
+
+    def test_simple_predict_violation_false(self, app_client: TestClient):
+        """
+        Тест /simple_predict без нарушения (is_violation=False).
+        Мокаем получение объявления из БД и предсказание модели.
+        """
+        from repositories.ads import Ad
+        mock_ad = Ad(
+            id=101,
+            seller_id=2,
+            name="Quality Product",
+            description="Detailed description with many details",
+            category=5,
+            images_qty=10,
+            seller_is_verified=True
+        )
+        
+        with patch('repositories.AdRepository.get_by_id', return_value=mock_ad):
+            with patch.object(
+                get_model_manager(),
+                'predict',
+                return_value=(False, 0.15)
+            ):
+                response = app_client.post(
+                    "/simple_predict",
+                    json={"item_id": 101}
+                )
+                
+                assert response.status_code == HTTPStatus.OK
+                data = response.json()
+                
+                assert data["is_violation"] is False
+                assert data["probability"] == 0.15
+                assert isinstance(data["probability"], float)
+                assert 0.0 <= data["probability"] <= 1.0
+
+
+class TestSimplePredictNotFound:
+    """Тесты для /simple_predict когда объявление не найдено"""
+
+    def test_simple_predict_ad_not_found(self, app_client: TestClient):
+        """
+        Тест /simple_predict когда объявление не существует в БД.
+        Должен вернуть 404.
+        """
+        # Мокаем репозиторий для возврата None (объявление не найдено)
+        with patch('repositories.AdRepository.get_by_id', return_value=None):
+            response = app_client.post(
+                "/simple_predict",
+                json={"item_id": 99999}
+            )
+            
+            assert response.status_code == HTTPStatus.NOT_FOUND
+            data = response.json()
+            assert "detail" in data
+            assert "99999" in data["detail"]
+
+
+class TestSimplePredictValidation:
+    """Тесты валидации для /simple_predict"""
+
+    def test_simple_predict_invalid_item_id_type(self, app_client: TestClient):
+        """Тест: неверный тип item_id"""
+        response = app_client.post(
+            "/simple_predict",
+            json={"item_id": "not_a_number"}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_simple_predict_negative_item_id(self, app_client: TestClient):
+        """Тест: отрицательный item_id"""
+        response = app_client.post(
+            "/simple_predict",
+            json={"item_id": -1}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_simple_predict_zero_item_id(self, app_client: TestClient):
+        """Тест: нулевой item_id"""
+        response = app_client.post(
+            "/simple_predict",
+            json={"item_id": 0}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_simple_predict_missing_item_id(self, app_client: TestClient):
+        """Тест: отсутствует item_id"""
+        response = app_client.post(
+            "/simple_predict",
+            json={}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+class TestDatabaseOperations:
+    """Тесты работы с базой данных"""
+
+    async def test_create_seller(self, seller_repository):
+        """Тест создания продавца в БД"""
+        seller = await seller_repository.create(
+            name="Test Seller",
+            is_verified=True
+        )
+        
+        assert seller is not None
+        assert seller.name == "Test Seller"
+        assert seller.is_verified is True
+        assert seller.id is not None
+        
+        # Очистка
+        await seller_repository.delete(seller.id)
+
+    async def test_create_ad(self, seller_repository, ad_repository):
+        """Тест создания объявления в БД"""
+        # Сначала создаем продавца
+        seller = await seller_repository.create(
+            name="Test Seller for Ad",
+            is_verified=False
+        )
+        
+        # Создаем объявление
+        ad = await ad_repository.create(
+            seller_id=seller.id,
+            name="Test Product",
+            description="Test description",
+            category=10,
+            images_qty=5
+        )
+        
+        assert ad is not None
+        assert ad.name == "Test Product"
+        assert ad.seller_id == seller.id
+        assert ad.images_qty == 5
+        assert ad.id is not None
+        
+        # Очистка
+        await ad_repository.delete(ad.id)
+        await seller_repository.delete(seller.id)
+
+    async def test_get_ad_with_seller(self, seller_repository, ad_repository):
+        """Тест получения объявления со связанными данными продавца"""
+        # Создаем продавца
+        seller = await seller_repository.create(
+            name="Verified Seller",
+            is_verified=True
+        )
+        
+        # Создаем объявление
+        ad = await ad_repository.create(
+            seller_id=seller.id,
+            name="Premium Product",
+            description="Quality description",
+            category=5,
+            images_qty=10
+        )
+        
+        # Получаем объявление со связанными данными
+        fetched_ad = await ad_repository.get_by_id(ad.id, include_seller=True)
+        
+        assert fetched_ad is not None
+        assert fetched_ad.id == ad.id
+        assert fetched_ad.seller_id == seller.id
+        assert fetched_ad.seller_is_verified is True  # Проверяем что данные продавца подтянулись
+        
+        # Очистка
+        await ad_repository.delete(ad.id)
+        await seller_repository.delete(seller.id)
+
+    async def test_get_nonexistent_ad(self, ad_repository):
+        """Тест получения несуществующего объявления"""
+        ad = await ad_repository.get_by_id(999999)
+        assert ad is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
