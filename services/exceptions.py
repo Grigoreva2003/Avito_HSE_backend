@@ -11,3 +11,8 @@ class ModelNotAvailableError(ServiceException):
 class PredictionError(ServiceException):
     """Исключение при ошибке предсказания"""
     pass
+
+
+class AdNotFoundError(ServiceException):
+    """Исключение, когда объявление не найдено"""
+    pass
