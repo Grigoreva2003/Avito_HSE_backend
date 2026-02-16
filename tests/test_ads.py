@@ -1,11 +1,13 @@
 from typing import Any
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from main import app
 from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 from ml import get_model_manager
 import numpy as np
+from database import get_database
 
 
 class TestSuccessfulPredictionViolation:
@@ -417,7 +419,19 @@ class TestSimplePredictValidation:
 class TestDatabaseOperations:
     """Тесты работы с базой данных"""
 
-    async def test_create_seller(self, seller_repository):
+    @pytest_asyncio.fixture(autouse=True)
+    async def ensure_database_pool(self):
+        """
+        Гарантирует, что пул БД инициализирован для каждого теста этого класса.
+        """
+        db = get_database()
+        await db.connect()
+        try:
+            yield
+        finally:
+            await db.disconnect()
+
+    async def test_create_seller(self, seller_repository, ensure_database_pool):
         """Тест создания продавца в БД"""
         seller = await seller_repository.create(
             name="Test Seller",
@@ -432,7 +446,7 @@ class TestDatabaseOperations:
         # Очистка
         await seller_repository.delete(seller.id)
 
-    async def test_create_ad(self, seller_repository, ad_repository):
+    async def test_create_ad(self, seller_repository, ad_repository, ensure_database_pool):
         """Тест создания объявления в БД"""
         # Сначала создаем продавца
         seller = await seller_repository.create(
@@ -459,7 +473,7 @@ class TestDatabaseOperations:
         await ad_repository.delete(ad.id)
         await seller_repository.delete(seller.id)
 
-    async def test_get_ad_with_seller(self, seller_repository, ad_repository):
+    async def test_get_ad_with_seller(self, seller_repository, ad_repository, ensure_database_pool):
         """Тест получения объявления со связанными данными продавца"""
         # Создаем продавца
         seller = await seller_repository.create(
@@ -488,7 +502,7 @@ class TestDatabaseOperations:
         await ad_repository.delete(ad.id)
         await seller_repository.delete(seller.id)
 
-    async def test_get_nonexistent_ad(self, ad_repository):
+    async def test_get_nonexistent_ad(self, ad_repository, ensure_database_pool):
         """Тест получения несуществующего объявления"""
         ad = await ad_repository.get_by_id(999999)
         assert ad is None

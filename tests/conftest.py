@@ -1,5 +1,5 @@
 import pytest
-import asyncio
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from main import app
 from ml import get_model_manager
@@ -14,7 +14,17 @@ def app_client() -> TestClient:
     model_manager = get_model_manager()
     if not model_manager.is_available():
         model_manager.load_model("model.pkl")
-    return TestClient(app)
+    
+    # Мокируем Kafka Producer для тестов
+    from unittest.mock import AsyncMock, patch
+    with patch('app.clients.kafka.get_kafka_producer') as mock_get_producer:
+        mock_producer = AsyncMock()
+        mock_producer.is_started = lambda: True
+        mock_producer.send_moderation_request = AsyncMock()
+        mock_get_producer.return_value = mock_producer
+
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture
@@ -36,28 +46,17 @@ def make_payload():
     return _make_payload
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Создает event loop для асинхронных тестов"""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_database(event_loop):
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def setup_database():
     """
     Подключение к БД перед тестами и отключение после.
     """
     db = get_database()
-    
-    # Подключаемся к БД
-    event_loop.run_until_complete(db.connect())
-    
+
+    await db.connect()
     yield db
-    
-    # Отключаемся от БД
-    event_loop.run_until_complete(db.disconnect())
+
+    await db.disconnect()
 
 
 @pytest.fixture
