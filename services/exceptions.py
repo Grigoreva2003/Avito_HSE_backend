@@ -16,3 +16,8 @@ class PredictionError(ServiceException):
 class AdNotFoundError(ServiceException):
     """Исключение, когда объявление не найдено"""
     pass
+
+
+class ModerationResultNotFoundError(ServiceException):
+    """Исключение, когда задача модерации не найдена"""
+    pass

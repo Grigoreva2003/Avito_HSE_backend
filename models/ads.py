@@ -19,14 +19,9 @@ class AdRequest(BaseModel):
         return v
 
 
-class SimplePredictRequest(BaseModel):
+class PredictRequest(BaseModel):
     """Модель запроса для simple_predict (только item_id)."""
     item_id: int = Field(..., gt=0, description="ID объявления")
-
-
-class AsyncPredictRequest(BaseModel):
-    """Модель запроса для async_predict (только item_id)."""
-    item_id: int = Field(..., gt=0, description="ID объявления для асинхронной модерации")
 
 
 class AsyncPredictResponse(BaseModel):
@@ -34,6 +29,15 @@ class AsyncPredictResponse(BaseModel):
     task_id: int = Field(..., description="ID задачи модерации")
     status: str = Field(..., description="Статус модерации (pending, completed, failed)")
     message: str = Field(..., description="Сообщение о статусе")
+
+
+class ModerationResultResponse(BaseModel):
+    """Модель ответа для получения результата модерации."""
+    task_id: int = Field(..., description="ID задачи модерации")
+    status: str = Field(..., description="Статус модерации (pending, completed, failed)")
+    is_violation: bool | None = Field(None, description="Результат модерации (NULL если не обработано)")
+    probability: float | None = Field(None, ge=0.0, le=1.0, description="Вероятность нарушения")
+    error_message: str | None = Field(None, description="Сообщение об ошибке (если failed)")
 
 
 class PredictResponse(BaseModel):

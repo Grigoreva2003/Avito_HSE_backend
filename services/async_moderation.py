@@ -2,7 +2,8 @@ import logging
 from repositories.ads import AdRepository
 from repositories.moderation_results import ModerationResultRepository
 from app.clients import get_kafka_producer
-from services.exceptions import AdNotFoundError
+from services.exceptions import AdNotFoundError, ModerationResultNotFoundError
+from models.ads import ModerationResultResponse
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class AsyncModerationService:
         """
         logger.info(f"Запрос на асинхронную модерацию: item_id={item_id}")
         
-        # 1. Проверяем что объявление существует
+        # Проверяем что объявление существует
         ad = await self._ad_repository.get_by_id(item_id, include_seller=False)
         if ad is None:
             logger.warning(f"Объявление не найдено: item_id={item_id}")
@@ -39,7 +40,7 @@ class AsyncModerationService:
         
         logger.info(f"Объявление найдено: item_id={item_id}, name={ad.name}")
         
-        # 2. Создаём запись в moderation_results со статусом pending
+        # Создаём запись в moderation_results со статусом pending
         moderation_result = await self._moderation_repository.create(
             item_id=item_id,
             status="pending"
@@ -48,7 +49,7 @@ class AsyncModerationService:
         task_id = moderation_result.id
         logger.info(f"Создана задача модерации: task_id={task_id}, item_id={item_id}")
         
-        # 3. Отправляем сообщение в Kafka
+        # Отправляем сообщение в Kafka
         try:
             await self._kafka_producer.send_moderation_request(item_id)
             logger.info(f"Сообщение отправлено в Kafka: task_id={task_id}, item_id={item_id}")
@@ -62,3 +63,35 @@ class AsyncModerationService:
             raise
         
         return task_id
+
+    async def get_moderation_result(self, task_id: int) -> ModerationResultResponse:
+        """
+        Получить результат асинхронной модерации по task_id.
+        
+        Args:
+            task_id: ID задачи модерации
+            
+        Returns:
+            ModerationResultResponse: Результат модерации со статусом
+            
+        Raises:
+            ModerationResultNotFoundError: Если задача модерации не найдена
+        """
+        logger.info(f"Запрос на получение статуса модерации: task_id={task_id}")
+        
+        # Получаем результат модерации из БД
+        moderation_row = await self._moderation_repository.get_by_id(task_id)
+        if moderation_row is None:
+            logger.warning(f"Задача модерации не найдена: task_id={task_id}")
+            raise ModerationResultNotFoundError(f"Задача модерации с ID {task_id} не найдена")
+        
+        logger.info(f"Задача модерации найдена: task_id={task_id}, status={moderation_row.status}")
+        
+        # Формируем ответ
+        return ModerationResultResponse(
+            task_id=moderation_row.id,  # Используем id, не task_id!
+            status=moderation_row.status,
+            is_violation=moderation_row.is_violation,
+            probability=moderation_row.probability,
+            error_message=moderation_row.error_message
+        )
