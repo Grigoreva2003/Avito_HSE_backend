@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка при подключении к БД: {e}")
         logger.warning("Приложение запущено БЕЗ подключения к БД")
-    
+
     # Startup: инициализация ModelManager
     logger.info("Запуск приложения: загрузка ML-модели...")
     try:
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка при загрузке модели: {e}")
         raise
-    
+
     # Startup: запуск Kafka Producer
     logger.info("Запуск приложения: подключение к Kafka...")
     try:
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: освобождение ресурсов
     logger.info("Завершение работы приложения...")
-    
+
     # Остановка Kafka Producer
     try:
         kafka_producer = get_kafka_producer()
@@ -67,10 +67,10 @@ async def lifespan(app: FastAPI):
         logger.info("Kafka Producer остановлен")
     except Exception as e:
         logger.error(f"Ошибка при остановке Kafka Producer: {e}")
-    
+
     # Выгружаем модель
     model_manager.unload()
-    
+
     # Закрываем подключение к БД
     try:
         await db.disconnect()

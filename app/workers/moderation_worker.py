@@ -122,9 +122,14 @@ class ModerationWorker:
             ad = await self.ad_repository.get_by_id(item_id, include_seller=True)
             
             if ad is None:
-                logger.error(f"Объявление не найдено: item_id={item_id}")
-                # Можно создать запись об ошибке или просто залогировать
-                await self.send_to_dlq(message, f"Ad not found: item_id={item_id}")
+                error_msg = f"Объявление не найдено: item_id={item_id}"
+                logger.error(error_msg)
+                
+                # Обновляем статус задачи на failed
+                await self._update_moderation_status_failed(item_id, error_msg)
+                
+                # Отправляем в DLQ
+                await self.send_to_dlq(message, error_msg)
                 return
             
             logger.info(
@@ -177,27 +182,52 @@ class ModerationWorker:
                 )
             
         except Exception as e:
-            logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
+            error_msg = f"Ошибка при обработке сообщения: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            # Обновляем статус задачи как failed
+            item_id = message.value.get('item_id')
+            if item_id:
+                await self._update_moderation_status_failed(item_id, str(e))
             
             # Отправляем в DLQ
             await self.send_to_dlq(message, str(e))
+    
+    async def _update_moderation_status_failed(self, item_id: int, error_message: str):
+        """
+        Обновить статус модерации на failed.
+        
+        Args:
+            item_id: ID объявления
+            error_message: Сообщение об ошибке
+        """
+        try:
+            query = """
+                UPDATE moderation_results
+                SET status = 'failed',
+                    error_message = $1,
+                    processed_at = NOW()
+                WHERE item_id = $2 
+                  AND status = 'pending'
+                RETURNING id
+            """
+            result = await self.db.fetchrow(query, error_message, item_id)
             
-            # Обновляем статус задачи как failed
-            try:
-                item_id = message.value.get('item_id')
-                if item_id:
-                    query = """
-                        UPDATE moderation_results
-                        SET status = 'failed',
-                            error_message = $1,
-                            processed_at = NOW()
-                        WHERE item_id = $2 
-                          AND status = 'pending'
-                    """
-                    await self.db.execute(query, str(e), item_id)
-                    logger.info(f"Статус задачи обновлён на 'failed' для item_id={item_id}")
-            except Exception as update_error:
-                logger.error(f"Ошибка при обновлении статуса failed: {update_error}")
+            if result:
+                task_id = result['id']
+                logger.info(
+                    f"Статус задачи обновлён на 'failed': task_id={task_id}, "
+                    f"item_id={item_id}, error={error_message}"
+                )
+            else:
+                logger.warning(
+                    f"Не найдено pending задач для обновления на failed: item_id={item_id}"
+                )
+        except Exception as update_error:
+            logger.error(
+                f"Ошибка при обновлении статуса failed для item_id={item_id}: {update_error}",
+                exc_info=True
+            )
     
     async def send_to_dlq(self, message, error_message: str):
         """
@@ -208,10 +238,15 @@ class ModerationWorker:
             error_message: Сообщение об ошибке
         """
         try:
+            # Получаем retry_count из оригинального сообщения или устанавливаем 1
+            original_data = message.value
+            retry_count = original_data.get('retry_count', 0) + 1
+            
             dlq_message = {
-                "original_message": message.value,
+                "original_message": original_data,
                 "error": error_message,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "retry_count": retry_count,
                 "topic": message.topic,
                 "partition": message.partition,
                 "offset": message.offset
@@ -223,8 +258,8 @@ class ModerationWorker:
             )
             
             logger.warning(
-                f"Сообщение отправлено в DLQ: item_id={message.value.get('item_id')}, "
-                f"error={error_message}"
+                f"Сообщение отправлено в DLQ: item_id={original_data.get('item_id')}, "
+                f"error={error_message}, retry_count={retry_count}"
             )
         except Exception as e:
             logger.error(f"Ошибка при отправке в DLQ: {e}", exc_info=True)
