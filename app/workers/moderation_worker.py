@@ -39,7 +39,7 @@ class ModerationWorker:
     """
 
     MAX_RETRIES = 3
-    RETRY_DELAY_SECONDS = 3  # Задержка перед повторной попыткой
+    RETRY_DELAY_SECONDS = 5  # Задержка перед повторной попыткой
 
     def __init__(self):
         self.settings = get_settings()
