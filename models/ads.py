@@ -24,6 +24,18 @@ class SimplePredictRequest(BaseModel):
     item_id: int = Field(..., gt=0, description="ID объявления")
 
 
+class AsyncPredictRequest(BaseModel):
+    """Модель запроса для async_predict (только item_id)."""
+    item_id: int = Field(..., gt=0, description="ID объявления для асинхронной модерации")
+
+
+class AsyncPredictResponse(BaseModel):
+    """Модель ответа для async_predict."""
+    task_id: int = Field(..., description="ID задачи модерации")
+    status: str = Field(..., description="Статус модерации (pending, completed, failed)")
+    message: str = Field(..., description="Сообщение о статусе")
+
+
 class PredictResponse(BaseModel):
     """Модель ответа с предсказанием модели."""
     is_violation: bool = Field(..., description="Есть ли нарушение в объявлении")

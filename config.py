@@ -66,6 +66,24 @@ class MLSettings(BaseSettings):
     )
 
 
+class KafkaSettings(BaseSettings):
+    """Настройки Kafka"""
+
+    bootstrap_servers: str = Field(default="localhost:9092", description="Kafka bootstrap серверы")
+    topic_moderation: str = Field(default="moderation", description="Топик для модерации")
+    topic_dlq: str = Field(default="moderation_dlq", description="Dead Letter Queue топик")
+    producer_timeout: int = Field(default=10, description="Таймаут отправки сообщения (сек)")
+    consumer_group_id: str = Field(default="moderation_workers", description="Consumer group ID")
+
+    model_config = SettingsConfigDict(
+        env_prefix="KAFKA_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
+
 class Settings:
     """Глобальные настройки приложения"""
 
@@ -73,6 +91,7 @@ class Settings:
         self.app = AppSettings()
         self.database = DatabaseSettings()
         self.ml = MLSettings()
+        self.kafka = KafkaSettings()
 
 
 # Глобальный экземпляр настроек (синглтон)

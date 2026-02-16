@@ -1,7 +1,14 @@
 from fastapi import APIRouter, HTTPException
 import logging
-from models.ads import AdRequest, SimplePredictRequest, PredictResponse
+from models.ads import (
+    AdRequest, 
+    SimplePredictRequest, 
+    PredictResponse,
+    AsyncPredictRequest,
+    AsyncPredictResponse
+)
 from services.moderation import ModerationService
+from services.async_moderation import AsyncModerationService
 from services.exceptions import ModelNotAvailableError, PredictionError, AdNotFoundError
 
 router = APIRouter()
@@ -45,6 +52,50 @@ async def predict(ad_data: AdRequest) -> PredictResponse:
         raise HTTPException(
             status_code=500,
             detail="Внутренняя ошибка сервера."
+        )
+
+
+@router.post("/async_predict", response_model=AsyncPredictResponse)
+async def async_predict(request: AsyncPredictRequest) -> AsyncPredictResponse:
+    """
+    Отправить запрос на асинхронную модерацию объявления.
+    
+    Объявление отправляется в очередь Kafka для обработки воркером.
+    Результат можно получить позже по task_id.
+    
+    Args:
+        request: Запрос с item_id объявления
+        
+    Returns:
+        AsyncPredictResponse: task_id и статус
+        
+    Raises:
+        HTTPException 404: Объявление не найдено
+        HTTPException 422: Невалидный item_id (автоматически Pydantic)
+        HTTPException 500: Внутренняя ошибка сервера
+    """
+    async_service = AsyncModerationService()
+    
+    try:
+        task_id = await async_service.submit_moderation_request(request.item_id)
+        
+        return AsyncPredictResponse(
+            task_id=task_id,
+            status="pending",
+            message="Moderation request accepted"
+        )
+        
+    except AdNotFoundError as e:
+        logger.warning(f"Объявление не найдено: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Объявление с ID {request.item_id} не найдено."
+        )
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при async_predict: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Внутренняя ошибка сервера при отправке задачи на модерацию."
         )
 
 

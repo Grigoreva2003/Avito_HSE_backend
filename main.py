@@ -5,6 +5,7 @@ import uvicorn
 import logging
 from ml import get_model_manager
 from database import get_database
+from app.clients import get_kafka_producer
 from config import get_settings
 
 # Загружаем настройки
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Управление жизненным циклом приложения.
-    Инициализирует Database и ModelManager при старте.
+    Инициализирует Database, ModelManager и Kafka Producer при старте.
     """
     # Startup: инициализация Database
     logger.info("Запуск приложения: подключение к базе данных...")
@@ -43,11 +44,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка при загрузке модели: {e}")
         raise
+    
+    # Startup: запуск Kafka Producer
+    logger.info("Запуск приложения: подключение к Kafka...")
+    try:
+        kafka_producer = get_kafka_producer()
+        await kafka_producer.start()
+        logger.info("Kafka Producer успешно запущен")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске Kafka Producer: {e}")
+        logger.warning("Приложение запущено БЕЗ Kafka Producer")
 
     yield
 
     # Shutdown: освобождение ресурсов
     logger.info("Завершение работы приложения...")
+    
+    # Остановка Kafka Producer
+    try:
+        kafka_producer = get_kafka_producer()
+        await kafka_producer.stop()
+        logger.info("Kafka Producer остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при остановке Kafka Producer: {e}")
     
     # Выгружаем модель
     model_manager.unload()

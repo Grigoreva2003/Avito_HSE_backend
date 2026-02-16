@@ -13,7 +13,10 @@ numpy>=1.24.0,<2.0.0
 # База данных PostgreSQL
 asyncpg>=0.29.0 
 psycopg2-binary>=2.9.0
-yandex-pgmigrate>=1.0.0 
+yandex-pgmigrate>=1.0.0
+
+# Kafka
+aiokafka>=0.10.0,<0.12.0 
 
 # Тестирование
 pytest>=8.0.0,<9.0.0
