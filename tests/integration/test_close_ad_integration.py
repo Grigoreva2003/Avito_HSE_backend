@@ -9,6 +9,7 @@ from services.moderation import ModerationService
 from database import get_database
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 class TestCloseAdIntegration:
     @pytest_asyncio.fixture(autouse=True)

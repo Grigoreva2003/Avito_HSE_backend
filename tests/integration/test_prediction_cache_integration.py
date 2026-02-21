@@ -34,6 +34,7 @@ async def redis_cache_storage():
         await redis_client.stop()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_integration_sync_prediction_cache_set_get_and_ttl(redis_cache_storage):
     storage, client = redis_cache_storage
@@ -56,6 +57,7 @@ async def test_integration_sync_prediction_cache_set_get_and_ttl(redis_cache_sto
     assert 0 < ttl <= storage.TTL_SECONDS
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_integration_async_moderation_cache_set_get_and_ttl(redis_cache_storage):
     storage, client = redis_cache_storage

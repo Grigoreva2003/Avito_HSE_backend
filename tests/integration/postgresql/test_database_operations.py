@@ -3,6 +3,7 @@ import pytest_asyncio
 
 from database import get_database
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 class TestDatabaseOperations:
     """Тесты работы с базой данных."""
