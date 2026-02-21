@@ -84,6 +84,31 @@ class KafkaSettings(BaseSettings):
     )
 
 
+class RedisSettings(BaseSettings):
+    """Настройки Redis"""
+
+    host: str = Field(default="localhost", description="Redis host")
+    port: int = Field(default=6379, description="Redis port")
+    db: int = Field(default=0, description="Redis database index")
+    password: str = Field(default="", description="Redis password")
+    ssl: bool = Field(default=False, description="Использовать SSL для Redis")
+
+    model_config = SettingsConfigDict(
+        env_prefix="REDIS_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
+    @property
+    def url(self) -> str:
+        """Получить URL подключения к Redis"""
+        auth_part = f":{self.password}@" if self.password else ""
+        scheme = "rediss" if self.ssl else "redis"
+        return f"{scheme}://{auth_part}{self.host}:{self.port}/{self.db}"
+
+
 class Settings:
     """Глобальные настройки приложения"""
 
@@ -92,6 +117,7 @@ class Settings:
         self.database = DatabaseSettings()
         self.ml = MLSettings()
         self.kafka = KafkaSettings()
+        self.redis = RedisSettings()
 
 
 # Глобальный экземпляр настроек (синглтон)

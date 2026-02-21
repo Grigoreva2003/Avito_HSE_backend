@@ -1,6 +1,7 @@
 import logging
 from repositories.ads import AdRepository
 from repositories.moderation_results import ModerationResultRepository
+from repositories.prediction_cache import PredictionCacheStorage
 from app.clients import get_kafka_producer
 from services.exceptions import AdNotFoundError, ModerationResultNotFoundError
 from models.ads import ModerationResultResponse
@@ -14,6 +15,7 @@ class AsyncModerationService:
     def __init__(self):
         self._ad_repository = AdRepository()
         self._moderation_repository = ModerationResultRepository()
+        self._prediction_cache = PredictionCacheStorage()
         self._kafka_producer = get_kafka_producer()
     
     async def submit_moderation_request(self, item_id: int) -> int:
@@ -78,7 +80,12 @@ class AsyncModerationService:
             ModerationResultNotFoundError: Если задача модерации не найдена
         """
         logger.info(f"Запрос на получение статуса модерации: task_id={task_id}")
-        
+
+        cached_result = await self._prediction_cache.get_moderation_result(task_id)
+        if cached_result is not None:
+            logger.info(f"Возвращаем async результат из кэша для task_id={task_id}")
+            return cached_result
+
         # Получаем результат модерации из БД
         moderation_row = await self._moderation_repository.get_by_id(task_id)
         if moderation_row is None:
@@ -88,10 +95,12 @@ class AsyncModerationService:
         logger.info(f"Задача модерации найдена: task_id={task_id}, status={moderation_row.status}")
         
         # Формируем ответ
-        return ModerationResultResponse(
+        result = ModerationResultResponse(
             task_id=moderation_row.id,  # Используем id, не task_id!
             status=moderation_row.status,
             is_violation=moderation_row.is_violation,
             probability=moderation_row.probability,
             error_message=moderation_row.error_message
         )
+        await self._prediction_cache.set_moderation_result(result)
+        return result

@@ -5,7 +5,7 @@ import uvicorn
 import logging
 from ml import get_model_manager
 from database import get_database
-from app.clients import get_kafka_producer
+from app.clients import get_kafka_producer, get_redis_client
 from config import get_settings
 
 # Загружаем настройки
@@ -55,6 +55,16 @@ async def lifespan(app: FastAPI):
         logger.error(f"Ошибка при запуске Kafka Producer: {e}")
         logger.warning("Приложение запущено БЕЗ Kafka Producer")
 
+    # Startup: подключение к Redis
+    logger.info("Запуск приложения: подключение к Redis...")
+    try:
+        redis_client = get_redis_client()
+        await redis_client.start()
+        logger.info("Redis клиент успешно подключен")
+    except Exception as e:
+        logger.error(f"Ошибка при подключении к Redis: {e}")
+        logger.warning("Приложение запущено БЕЗ Redis")
+
     yield
 
     # Shutdown: освобождение ресурсов
@@ -67,6 +77,14 @@ async def lifespan(app: FastAPI):
         logger.info("Kafka Producer остановлен")
     except Exception as e:
         logger.error(f"Ошибка при остановке Kafka Producer: {e}")
+
+    # Остановка Redis клиента
+    try:
+        redis_client = get_redis_client()
+        await redis_client.stop()
+        logger.info("Redis клиент остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при остановке Redis клиента: {e}")
 
     # Выгружаем модель
     model_manager.unload()

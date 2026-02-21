@@ -3,6 +3,7 @@ from models.ads import AdRequest, PredictResponse
 from services.exceptions import ModelNotAvailableError, PredictionError, AdNotFoundError
 from ml import get_model_manager
 from repositories import AdRepository
+from repositories.prediction_cache import PredictionCacheStorage
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class ModerationService:
         """Инициализация сервиса модерации"""
         self._model_manager = get_model_manager()
         self._ad_repository = AdRepository()
+        self._prediction_cache = PredictionCacheStorage()
     
     def predict_violation(self, ad_data: AdRequest) -> PredictResponse:
         """
@@ -92,6 +94,11 @@ class ModerationService:
             PredictionError: При ошибке предсказания
         """
         logger.info(f"Запрос на предсказание по item_id={item_id}")
+
+        cached_prediction = await self._prediction_cache.get(item_id)
+        if cached_prediction is not None:
+            logger.info(f"Возвращаем результат из кэша для item_id={item_id}")
+            return cached_prediction
         
         # Получаем объявление из БД со связанными данными продавца
         ad = await self._ad_repository.get_by_id(item_id, include_seller=True)
@@ -125,10 +132,12 @@ class ModerationService:
                 f"is_violation={is_violation}, probability={probability:.4f}"
             )
             
-            return PredictResponse(
+            response = PredictResponse(
                 is_violation=is_violation,
                 probability=probability
             )
+            await self._prediction_cache.set(item_id, response)
+            return response
         
         except RuntimeError as e:
             logger.error(f"Модель недоступна: {e}")
