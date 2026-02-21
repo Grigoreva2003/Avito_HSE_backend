@@ -35,6 +35,8 @@ class Database:
                     host=db_config.host,
                     port=db_config.port,
                     database=db_config.database,
+                    user=db_config.user,
+                    password=db_config.password,
                     min_size=db_config.pool_min_size,
                     max_size=db_config.pool_max_size
                 )

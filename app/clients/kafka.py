@@ -62,12 +62,13 @@ class KafkaProducer:
             logger.error(f"Ошибка при остановке KafkaProducer: {e}")
             raise
     
-    async def send_moderation_request(self, item_id: int) -> None:
+    async def send_moderation_request(self, item_id: int, task_id: int) -> None:
         """
         Отправить запрос на модерацию в Kafka.
         
         Args:
             item_id: ID объявления для модерации
+            task_id: ID задачи модерации
             
         Raises:
             RuntimeError: Если producer не запущен
@@ -78,11 +79,12 @@ class KafkaProducer:
         
         message = {
             "item_id": item_id,
+            "task_id": task_id,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         try:
-            logger.info(f"Отправка сообщения в Kafka: item_id={item_id}")
+            logger.info(f"Отправка сообщения в Kafka: task_id={task_id}, item_id={item_id}")
             
             # Отправляем сообщение в топик
             await self._producer.send_and_wait(
@@ -90,10 +92,15 @@ class KafkaProducer:
                 value=message
             )
             
-            logger.info(f"Сообщение успешно отправлено в топик {self._settings.topic_moderation}: item_id={item_id}")
+            logger.info(
+                f"Сообщение успешно отправлено в топик {self._settings.topic_moderation}: "
+                f"task_id={task_id}, item_id={item_id}"
+            )
             
         except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения в Kafka для item_id={item_id}: {e}")
+            logger.error(
+                f"Ошибка при отправке сообщения в Kafka для task_id={task_id}, item_id={item_id}: {e}"
+            )
             raise
     
     def is_started(self) -> bool:

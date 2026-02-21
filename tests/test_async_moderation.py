@@ -134,7 +134,7 @@ class TestAsyncPredictTaskCreation:
             assert task_id == 321
             mock_ad_repo.get_by_id.assert_awaited_once_with(100, include_seller=False)
             mock_mod_repo.create.assert_awaited_once_with(item_id=100, status="pending")
-            fake_kafka.send_moderation_request.assert_awaited_once_with(100)
+            fake_kafka.send_moderation_request.assert_awaited_once_with(item_id=100, task_id=321)
             mock_mod_repo.update_failed.assert_not_called()
 
     @pytest.mark.asyncio
@@ -188,7 +188,7 @@ class TestAsyncPredictTaskCreation:
                 await service.submit_moderation_request(100)
 
             mock_mod_repo.create.assert_awaited_once_with(item_id=100, status="pending")
-            fake_kafka.send_moderation_request.assert_awaited_once_with(100)
+            fake_kafka.send_moderation_request.assert_awaited_once_with(item_id=100, task_id=777)
             mock_mod_repo.update_failed.assert_awaited_once()
 
 
@@ -236,10 +236,11 @@ class TestModerationWorker:
     """Тесты обработки сообщений воркером и DLQ."""
 
     @staticmethod
-    def _message(item_id, retry_count=0):
+    def _message(item_id, task_id=11, retry_count=0):
         return SimpleNamespace(
             value={
                 "item_id": item_id,
+                "task_id": task_id,
                 "timestamp": "2026-01-01T00:00:00Z",
                 "retry_count": retry_count,
             },
@@ -269,7 +270,7 @@ class TestModerationWorker:
         worker.ad_repository.get_by_id.return_value = ad
         worker.db.fetchrow.return_value = {"id": 11}
 
-        message = self._message(item_id=100)
+        message = self._message(item_id=100, task_id=11)
 
         await worker.process_message(message)
 
@@ -281,8 +282,8 @@ class TestModerationWorker:
             category=1,
         )
         worker.db.fetchrow.assert_awaited_once()
-        # query, is_violation, probability, item_id
-        assert worker.db.fetchrow.call_args.args[1:] == (True, 0.91, 100)
+        # query, is_violation, probability, task_id
+        assert worker.db.fetchrow.call_args.args[1:] == (True, 0.91, 11)
 
     @pytest.mark.asyncio
     async def test_worker_sends_to_dlq_on_missing_item_id(self):

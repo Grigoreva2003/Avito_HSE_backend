@@ -51,7 +51,7 @@ class AsyncModerationService:
         
         # Отправляем сообщение в Kafka
         try:
-            await self._kafka_producer.send_moderation_request(item_id)
+            await self._kafka_producer.send_moderation_request(item_id=item_id, task_id=task_id)
             logger.info(f"Сообщение отправлено в Kafka: task_id={task_id}, item_id={item_id}")
         except Exception as e:
             logger.error(f"Ошибка при отправке в Kafka: {e}")

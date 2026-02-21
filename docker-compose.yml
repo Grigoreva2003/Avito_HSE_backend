@@ -1,4 +1,18 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: avito_postgres
+    environment:
+      POSTGRES_DB: avito_moderation
+      POSTGRES_USER: vagrigorevaaa
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - avito_network
+
   redpanda:
     image: redpandadata/redpanda:latest
     container_name: avito_redpanda
@@ -40,3 +54,6 @@ services:
 networks:
   avito_network:
     driver: bridge
+
+volumes:
+  postgres_data:

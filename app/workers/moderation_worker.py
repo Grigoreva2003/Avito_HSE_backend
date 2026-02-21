@@ -29,7 +29,7 @@ class ModerationWorker:
     """
     Воркер для обработки задач модерации из Kafka.
 
-    Подписывается на топик 'moderation', получает item_id,
+    Подписывается на топик 'moderation', получает task_id и item_id,
     загружает данные из БД, запускает ML-модель и сохраняет результат.
 
     Поддерживает механизм retry для временных ошибок:
@@ -39,7 +39,7 @@ class ModerationWorker:
     """
 
     MAX_RETRIES = 3
-    RETRY_DELAY_SECONDS = 5  # Задержка перед повторной попыткой
+    RETRY_BASE_DELAY_SECONDS = 5  # Базовая задержка для экспоненциального retry
 
     def __init__(self):
         self.settings = get_settings()
@@ -73,7 +73,7 @@ class ModerationWorker:
             group_id=self.settings.kafka.consumer_group_id,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
             auto_offset_reset='earliest',
-            enable_auto_commit=True
+            enable_auto_commit=False
         )
 
         # Создание DLQ Producer (для ошибочных сообщений)
@@ -123,22 +123,27 @@ class ModerationWorker:
         Обработка одного сообщения из Kafka.
 
         Args:
-            message: Сообщение из Kafka с item_id
+            message: Сообщение из Kafka с task_id и item_id
         """
         try:
             data = message.value
             item_id = data.get('item_id')
+            task_id = data.get('task_id')
             timestamp = data.get('timestamp')
             retry_count = data.get('retry_count', 0)
 
             logger.info(
-                f"Получено сообщение: item_id={item_id}, "
+                f"Получено сообщение: task_id={task_id}, item_id={item_id}, "
                 f"timestamp={timestamp}, retry_count={retry_count}"
             )
 
             if not item_id:
                 logger.error(f"Сообщение не содержит item_id: {data}")
                 await self.send_to_dlq(message, "Missing item_id in message", is_permanent=True)
+                return
+            if not task_id:
+                logger.error(f"Сообщение не содержит task_id: {data}")
+                await self.send_to_dlq(message, "Missing task_id in message", is_permanent=True)
                 return
 
             # 1. Получаем данные объявления из БД
@@ -149,7 +154,7 @@ class ModerationWorker:
                 logger.error(error_msg)
 
                 # Это постоянная ошибка - объявление не появится при повторе
-                await self._update_moderation_status_failed(item_id, error_msg)
+                await self._update_moderation_status_failed(task_id, error_msg)
                 await self.send_to_dlq(message, error_msg, is_permanent=True)
                 return
 
@@ -158,9 +163,7 @@ class ModerationWorker:
                 f"seller_id={ad.seller_id}, is_verified={ad.seller_is_verified}"
             )
 
-            # 2. Находим соответствующую задачу модерации
-            # (предполагаем что она была создана при отправке в Kafka)
-            # Для простоты можно искать по item_id с статусом pending
+            # 2. Находим соответствующую задачу модерации по task_id
 
             # 3. Вызываем ML-модель для предсказания
             is_violation, probability = self.model_manager.predict(
@@ -176,19 +179,18 @@ class ModerationWorker:
             )
 
             # 4. Обновляем результат в БД
-            # Находим запись moderation_results по item_id (последнюю pending)
             query = """
                 UPDATE moderation_results
                 SET status = 'completed',
                     is_violation = $1,
                     probability = $2,
                     processed_at = NOW()
-                WHERE item_id = $3
+                WHERE id = $3
                   AND status = 'pending'
                 RETURNING id
             """
 
-            result = await self.db.fetchrow(query, is_violation, probability, item_id)
+            result = await self.db.fetchrow(query, is_violation, probability, task_id)
 
             if result:
                 task_id = result['id']
@@ -198,7 +200,7 @@ class ModerationWorker:
                 )
             else:
                 logger.warning(
-                    f"Не найдено pending задач для item_id={item_id}. "
+                    f"Не найдена pending задача для task_id={task_id}. "
                     "Возможно задача уже обработана."
                 )
 
@@ -209,6 +211,7 @@ class ModerationWorker:
 
             retry_count = message.value.get('retry_count', 0)
             item_id = message.value.get('item_id')
+            task_id = message.value.get('task_id')
 
             if retry_count < self.MAX_RETRIES:
                 # Повторная попытка
@@ -216,9 +219,9 @@ class ModerationWorker:
             else:
                 # Исчерпаны попытки
                 logger.error(f"Исчерпаны попытки для item_id={item_id} после {retry_count} попыток")
-                if item_id:
+                if task_id:
                     await self._update_moderation_status_failed(
-                        item_id,
+                        task_id,
                         f"Максимум попыток достигнут. Последняя ошибка: {str(e)}"
                     )
                 await self.send_to_dlq(message, error_msg, is_permanent=False)
@@ -229,6 +232,7 @@ class ModerationWorker:
             logger.error(error_msg, exc_info=True)
 
             item_id = message.value.get('item_id')
+            task_id = message.value.get('task_id')
             retry_count = message.value.get('retry_count', 0)
 
             # Проверяем retry_count
@@ -237,16 +241,16 @@ class ModerationWorker:
                 await self.schedule_retry(message, error_msg)
             else:
                 # Исчерпаны попытки
-                if item_id:
-                    await self._update_moderation_status_failed(item_id, str(e))
+                if task_id:
+                    await self._update_moderation_status_failed(task_id, str(e))
                 await self.send_to_dlq(message, error_msg, is_permanent=False)
 
-    async def _update_moderation_status_failed(self, item_id: int, error_message: str):
+    async def _update_moderation_status_failed(self, task_id: int, error_message: str):
         """
         Обновить статус модерации на failed.
 
         Args:
-            item_id: ID объявления
+            task_id: ID задачи модерации
             error_message: Сообщение об ошибке
         """
         try:
@@ -255,25 +259,25 @@ class ModerationWorker:
                 SET status = 'failed',
                     error_message = $1,
                     processed_at = NOW()
-                WHERE item_id = $2
+                WHERE id = $2
                   AND status = 'pending'
                 RETURNING id
             """
-            result = await self.db.fetchrow(query, error_message, item_id)
+            result = await self.db.fetchrow(query, error_message, task_id)
 
             if result:
                 task_id = result['id']
                 logger.info(
                     f"Статус задачи обновлён на 'failed': task_id={task_id}, "
-                    f"item_id={item_id}, error={error_message}"
+                    f"error={error_message}"
                 )
             else:
                 logger.warning(
-                    f"Не найдено pending задач для обновления на failed: item_id={item_id}"
+                    f"Не найдена pending задача для обновления на failed: task_id={task_id}"
                 )
         except Exception as update_error:
             logger.error(
-                f"Ошибка при обновлении статуса failed для item_id={item_id}: {update_error}",
+                f"Ошибка при обновлении статуса failed для task_id={task_id}: {update_error}",
                 exc_info=True
             )
 
@@ -287,12 +291,16 @@ class ModerationWorker:
         """
         try:
             original_data = message.value
-            retry_count = original_data.get('retry_count', 0) + 1
+            current_retry_count = original_data.get('retry_count', 0)
+            retry_count = current_retry_count + 1
             item_id = original_data.get('item_id')
+            task_id = original_data.get('task_id')
+            retry_delay_seconds = self.RETRY_BASE_DELAY_SECONDS * (2 ** current_retry_count)
 
             # Создаем новое сообщение с увеличенным retry_count
             retry_message = {
                 "item_id": item_id,
+                "task_id": task_id,
                 "timestamp": original_data.get('timestamp'),
                 "retry_count": retry_count,
                 "last_error": error_message
@@ -300,11 +308,11 @@ class ModerationWorker:
 
             logger.info(
                 f"Запланирована повторная попытка #{retry_count}/{self.MAX_RETRIES} "
-                f"для item_id={item_id} через {self.RETRY_DELAY_SECONDS} сек"
+                f"для task_id={task_id}, item_id={item_id} через {retry_delay_seconds} сек"
             )
 
             # Задержка перед повторной отправкой
-            await asyncio.sleep(self.RETRY_DELAY_SECONDS)
+            await asyncio.sleep(retry_delay_seconds)
 
             # Отправляем обратно в основной топик
             await self.retry_producer.send_and_wait(
@@ -314,7 +322,7 @@ class ModerationWorker:
 
             logger.info(
                 f"Сообщение отправлено на повторную обработку: "
-                f"item_id={item_id}, retry_count={retry_count}"
+                f"task_id={task_id}, item_id={item_id}, retry_count={retry_count}"
             )
 
         except Exception as e:
@@ -354,7 +362,8 @@ class ModerationWorker:
             )
 
             logger.warning(
-                f"Сообщение отправлено в DLQ: item_id={original_data.get('item_id')}, "
+                f"Сообщение отправлено в DLQ: task_id={original_data.get('task_id')}, "
+                f"item_id={original_data.get('item_id')}, "
                 f"error={error_message}, retry_count={retry_count}, type={error_type}"
             )
         except Exception as e:
@@ -368,6 +377,7 @@ class ModerationWorker:
                     break
 
                 await self.process_message(message)
+                await self.consumer.commit()
 
         except asyncio.CancelledError:
             logger.info("Воркер получил сигнал остановки")
