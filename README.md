@@ -7,6 +7,12 @@
 ## Описание проекта
 Сервис модерации объявлений с использованием ML-модели (LogisticRegression) для предсказания нарушений. 
 
+## Документация по компонентам
+
+- Тесты и сценарии запуска: [`tests/README.md`](tests/README.md)
+- Асинхронная обработка, retry, DLQ: [`app/workers/README.md`](app/workers/README.md)
+- Миграции и схема БД: [`db/README.md`](db/README.md)
+
 ### Архитектура
 Проект построен по принципу **многослойной микросервисной архитектуры**:
 
@@ -23,7 +29,8 @@
 ├── main.py                         # Точка входа FastAPI
 ├── config.py                       # Настройки приложения
 ├── database.py                     # Подключение к PostgreSQL
-├── docker-compose.yml              # Redpanda (Kafka) + Console
+├── docker-compose.yml              # PostgreSQL + Redis + Redpanda + Console
+├── pytest.ini                      # Маркеры тестов (integration)
 ├── ml/                             # ML слой
 │   ├── __init__.py
 │   └── model_manager.py            # ModelManager - работа с ML-моделью
@@ -39,24 +46,31 @@
 │   ├── __init__.py
 │   ├── sellers.py                  # CRUD для продавцов
 │   ├── ads.py                      # CRUD для объявлений
-│   └── moderation_results.py       # CRUD для результатов модерации
-├── app/                            # Kafka интеграция
+│   ├── moderation_results.py       # CRUD для результатов модерации
+│   └── prediction_cache.py         # Кэш предсказаний (Redis)
+├── app/                            # Клиенты и воркеры
 │   ├── clients/
 │   │   ├── __init__.py
-│   │   └── kafka.py                # Kafka Producer
+│   │   ├── kafka.py                # Kafka Producer
+│   │   └── redis.py                # Redis client
 │   └── workers/
 │       ├── __init__.py
 │       ├── moderation_worker.py    # Kafka Consumer (воркер)
 │       └── dlq_monitor.py          # DLQ Monitor
-├── db/                             # SQL миграции
+├── db/                             # SQL миграции и конфиг
+│   ├── migrations/
+│   │   ├── V001__initial_schema.sql
+│   │   ├── V002__seed_data.sql
+│   │   ├── V003__moderation_results.sql
+│   │   └── V004__add_is_closed_to_ads.sql
 │   ├── README.md
-│   ├── V001__initial_schema.sql
-│   ├── V002__seed_data.sql
-│   ├── V003__moderation_results.sql
 │   └── migrations.yml
-├── tests/                          # Unit-тесты
+├── tests/
 │   ├── conftest.py                 # Общие фикстуры
-│   └── test_ads.py                 # Тесты для /predict
+│   ├── unit/                       # API и бизнес-логика (с моками)
+│   └── integration/                # Интеграционные тесты
+│       ├── postgresql/             # Тесты репозиториев PostgreSQL
+│       └── test_prediction_cache_integration.py
 └── requirements.txt                # Зависимости Python
 ```
 
@@ -119,10 +133,10 @@ EOF
 pip install -r requirements.txt
 ```
 
-### 5. Запустите Docker с Redpanda (Kafka)
+### 5. Запустите инфраструктуру в Docker (PostgreSQL + Redis + Kafka)
 
 ```bash
-# Запустить Redpanda и Console
+# Запустить все сервисы
 docker-compose up -d
 
 # Проверить статус
@@ -130,8 +144,15 @@ docker-compose ps
 ```
 
 **Сервисы:**
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
 - Kafka (Redpanda): `localhost:9092`
 - Web Console: http://localhost:8080
+
+Если нужен только Redis (например, для проверки кэша):
+```bash
+docker-compose up -d redis
+```
 
 ### 6. Запустите приложение
 
@@ -194,58 +215,8 @@ print(settings.ml.model_path)          # model.pkl
 ```
 ## База данных
 
-### Схема БД
-
-Проект использует PostgreSQL с двумя связанными таблицами:
-
-- **sellers** (продавцы/пользователи) - хранит информацию о продавцах
-- **ads** (объявления) - хранит информацию об объявлениях
-
-Связь: `ads.seller_id` → `sellers.id` (один продавец может иметь много объявлений)
-
-### Создание БД и применение миграций
-
-```bash
-# Создайте базу данных
-createdb avito_moderation
-
-# Примените миграции через pgmigrate
-cd db
-pgmigrate -t latest migrate
-cd ..
-
-# Или вручную через psql
-psql avito_moderation -f db/V001__initial_schema.sql
-psql avito_moderation -f db/V002__seed_data.sql
-
-# Проверьте что таблицы созданы
-psql avito_moderation -c "\dt"
-psql avito_moderation -c "SELECT COUNT(*) FROM sellers;"
-psql avito_moderation -c "SELECT COUNT(*) FROM ads;"
-```
-
-**Важно:** Если используете другие параметры подключения (хост, порт, пользователь), измените их в `db/migrations.yml`.
-
-**Пояснение:**
-- `envsubst < migrations.yml` - подставляет переменные `${DB_HOST}`, `${DB_PORT}` и т.д. из окружения
-- `pgmigrate -c /dev/stdin` - читает конфиг из stdin (уже с подставленными значениями)
-
-### Проверка данных
-
-```bash
-# Проверьте таблицы
-psql avito_moderation -c "\dt"
-
-# Посмотрите структуру таблиц
-psql avito_moderation -c "\d sellers"
-psql avito_moderation -c "\d ads"
-
-# Посмотрите тестовые данные
-psql avito_moderation -c "SELECT * FROM sellers;"
-psql avito_moderation -c "SELECT * FROM ads LIMIT 5;"
-```
-
-Подробнее о схеме БД и миграциях см. [`db/README.md`](db/README.md).
+Подробная документация по схеме, миграциям, применению и проверке данных
+вынесена в [`db/README.md`](db/README.md).
 
 ### Репозитории
 
@@ -340,7 +311,7 @@ print(ad.seller_is_verified)  # True
 }
 ```
 
-**Ответ (202 Accepted):**
+**Ответ (200 OK):**
 ```json
 {
   "task_id": 1,
@@ -351,6 +322,36 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Задача принята
+- `404` - Объявление не найдено
+- `422` - Ошибка валидации
+- `500` - Внутренняя ошибка
+
+#### POST /close
+Закрыть объявление по `item_id`.
+
+Метод удаляет:
+- объявление из PostgreSQL,
+- связанные записи `moderation_results` из PostgreSQL,
+- кэш предсказания по `item_id` и кэш async-результатов по `task_id` из Redis.
+
+**Запрос:**
+```json
+{
+  "item_id": 100
+}
+```
+
+**Ответ (200 OK):**
+```json
+{
+  "item_id": 100,
+  "status": "closed",
+  "message": "Ad successfully closed"
+}
+```
+
+**Коды ответов:**
+- `200` - Объявление успешно закрыто
 - `404` - Объявление не найдено
 - `422` - Ошибка валидации
 - `500` - Внутренняя ошибка
@@ -394,113 +395,12 @@ print(ad.seller_is_verified)  # True
 - `404` - Задача не найдена
 - `500` - Внутренняя ошибка
 
-## Асинхронная обработка через Kafka
+## Асинхронная обработка и тестирование
 
-### Архитектура
+Подробная документация вынесена в компонентные файлы:
 
-```
-┌─────────┐  POST /async_predict  ┌──────────┐  Kafka Queue     ┌────────────┐
-│ Client  │ ─────────────────────► │ FastAPI  │ ──────────────► │ Worker     │
-└─────────┘                        └──────────┘                 └─────┬──────┘
-                                                                      │
-    ↑                                                                 ▼
-    │                                                          ┌──────────────┐
-    │                                                          │ PostgreSQL   │
-    │                                                          │ + ML Model   │
-    │                                                          └──────────────┘
-    │                                                                 │
-    │                                                                 ▼
-    └──────── GET /moderation_result/{task_id} ◄──────────────────────
-```
-
-### Запуск компонентов
-
-```bash
-# Терминал 1: Docker (Redpanda)
-docker-compose up -d
-
-# Терминал 2: FastAPI
-python3.11 main.py
-
-# Терминал 3: Worker
-python3.11 -m app.workers.moderation_worker
-
-# Терминал 4: DLQ Monitor (опционально)
-python3.11 -m app.workers.dlq_monitor
-```
-
-### Workflow
-
-1. **Клиент отправляет** `POST /async_predict` с `item_id`
-2. **API создаёт** запись в `moderation_results` (status=`pending`)
-3. **API отправляет** сообщение в Kafka топик `moderation`
-4. **API возвращает** `task_id` клиенту
-5. **Воркер получает** сообщение из Kafka
-6. **Воркер загружает** данные объявления из БД
-7. **Воркер запускает** ML-модель
-8. **Воркер обновляет** `moderation_results` (status=`completed`)
-9. **Клиент проверяет** статус через `GET /moderation_result/{task_id}`
-
-### Retry механизм
-
-Воркер автоматически повторяет обработку при временных ошибках:
-
-- **Максимум попыток**: 3
-- **Задержка между попытками**: 3 секунды
-- **Типы ошибок:**
-  - **Permanent** (постоянные) → сразу в DLQ
-  - **Temporary** (временные) → 3 попытки → DLQ
-
-**Примеры:**
-- Объявление не найдено → Permanent → DLQ
-- ML-модель недоступна → Temporary → 3 retry → DLQ
-- Таймаут БД → Temporary → 3 retry → DLQ
-
-### Dead Letter Queue (DLQ)
-
-Ошибочные сообщения попадают в топик `moderation_dlq`.
-
-**Просмотр DLQ:**
-```bash
-# Запустить монитор
-python3.11 -m app.workers.dlq_monitor
-
-# Или через Web Console
-open http://localhost:8080
-```
-
-**Формат сообщения в DLQ:**
-```json
-{
-  "original_message": {
-    "item_id": 100,
-    "timestamp": "2026-02-16T12:00:00Z",
-    "retry_count": 3
-  },
-  "error": "ML-модель недоступна",
-  "error_type": "max_retries_exceeded",
-  "timestamp": "2026-02-16T12:00:20Z",
-  "retry_count": 3
-}
-```
-
-## Тестирование
-
-### Запуск всех тестов
-```bash
-pytest tests/ -v
-```
-
-### Запуск всех внутри одного модуля
-```bash
-pytest tests/test_ads.py -v
-```
-
-### Запуск конкретного класса тестов
-```bash
-pytest tests/test_ads.py::TestSuccessfulPredictionViolation -v
-```
-
+- Воркеры, retry и DLQ: [`app/workers/README.md`](app/workers/README.md)
+- Запуск и структура тестов: [`tests/README.md`](tests/README.md)
 
 ## Примеры использования
 
@@ -543,129 +443,7 @@ curl http://localhost:8003/moderation_result/1
 # После обработки: {"status": "completed", "is_violation": false, ...}
 ```
 
-## Демонстрация событий в Kafka
-
-Для демонстрации работы retry механизма и DLQ была добавлена симуляция ошибки в код воркера.
-
-### Настройка тестового сценария
-
-В файл `app/workers/moderation_worker.py` временно добавлено исключение после ML-предсказания:
-
-```python
-# 3. Вызываем ML-модель для предсказания
-is_violation, probability = self.model_manager.predict(
-    is_verified_seller=ad.seller_is_verified,
-    images_qty=ad.images_qty,
-    description=ad.description,
-    category=ad.category
-)
-raise RuntimeError("ML-модель недоступна")  # ← Симуляция ошибки
-```
-
-### Запуск компонентов
-
-```bash
-# Терминал 1: FastAPI
-python3.11 main.py
-
-# Терминал 2: Kafka Worker
-python3.11 -m app.workers.moderation_worker
-
-# Терминал 3: DLQ Monitor
-python3.11 -m app.workers.dlq_monitor
-```
-
-### Тестовые запросы
-
-**1. Отправка задачи на асинхронную модерацию:**
-
-```bash
-curl -X POST http://localhost:8003/async_predict \
-  -H "Content-Type: application/json" \
-  -d '{"item_id": 100}'
-```
-
-**Ответ:**
-```json
-{"task_id":11,"status":"pending","message":"Moderation request accepted"}
-```
-
-**2. Проверка статуса задачи:**
-
-```bash
-curl -X GET http://localhost:8003/moderation_result/11
-```
-
-**Ответ (пока воркер делает retry попытки):**
-```json
-{"task_id":11,"status":"pending","is_violation":null,"probability":null,"error_message":null}
-```
-
-### Результаты работы компонентов
-
-#### FastAPI (main.py)
-
-![FastAPI запуск](imgs/main.png)
-
-
-#### Worker (moderation_worker.py)
-
-Воркер выполняет 3 retry попытки с интервалом 3 секунды:
-
-![Worker retry попытки](imgs/worker_fail.png)
-
-
-#### DLQ Monitor (dlq_monitor.py)
-
-Монитор показывает финальное сообщение в Dead Letter Queue:
-
-![DLQ сообщение](imgs/dlq_error.png)
-
-
-### Проверка результата в БД
-
-```bash
-psql -d avito_moderation -c "
-  SELECT id, item_id, status, error_message 
-  FROM moderation_results 
-  WHERE id = 11;
-"
-```
-
-**Результат:**
-```
- id | item_id | status | error_message
-----+---------+--------+----------------------------------------------
- 11 |     100 | failed | Максимум попыток достигнут. Последняя ошибка: ML-модель недоступна
-```
-
 ## Мониторинг и отладка
 
-### Kafka Web Console
-```bash
-# Откройте в браузере
-open http://localhost:8080
-
-# Доступные возможности:
-# - Просмотр топиков (moderation, moderation_dlq)
-# - Просмотр сообщений в реальном времени
-# - Статистика по партициям и consumer groups
-```
-
-### Проверка БД
-```bash
-# Проверить задачи модерации
-psql -d avito_moderation -c "
-  SELECT id, item_id, status, is_violation, probability, created_at, processed_at
-  FROM moderation_results
-  ORDER BY id DESC
-  LIMIT 10;
-"
-
-# Проверить failed задачи
-psql -d avito_moderation -c "
-  SELECT id, item_id, status, error_message
-  FROM moderation_results
-  WHERE status = 'failed';
-"
-```
+Раздел мониторинга Kafka/DLQ и диагностические сценарии вынесены в:
+[`app/workers/README.md`](app/workers/README.md)

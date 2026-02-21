@@ -6,6 +6,8 @@
 
 - `V001__initial_schema.sql` - Создание таблиц `sellers` и `ads`
 - `V002__seed_data.sql` - Вставка тестовых данных
+- `V003__moderation_results.sql` - Таблица асинхронных результатов модерации
+- `V004__add_is_closed_to_ads.sql` - Флаг закрытия объявления (`ads.is_closed`)
 
 ## Схема БД
 
@@ -29,6 +31,7 @@
 | description | TEXT NOT NULL           | Описание товара                       |
 | category    | INTEGER NOT NULL        | Категория товара                      |
 | images_qty  | INTEGER DEFAULT 0       | Количество изображений (>= 0)         |
+| is_closed   | BOOLEAN DEFAULT FALSE   | Флаг закрытия объявления              |
 | created_at  | TIMESTAMP WITH TZ       | Дата создания                         |
 | updated_at  | TIMESTAMP WITH TZ       | Дата обновления                       |
 
@@ -42,6 +45,30 @@
 - `idx_sellers_is_verified` - индекс на `sellers.is_verified` для фильтрации по статусу
 
 ## Применение миграций
+
+### Создание БД и применение миграций
+
+```bash
+# Создайте базу данных
+createdb avito_moderation
+
+# Примените миграции через pgmigrate
+cd db
+pgmigrate -t latest migrate
+cd ..
+
+# Или вручную через psql
+psql avito_moderation -f db/migrations/V001__initial_schema.sql
+psql avito_moderation -f db/migrations/V002__seed_data.sql
+psql avito_moderation -f db/migrations/V003__moderation_results.sql
+psql avito_moderation -f db/migrations/V004__add_is_closed_to_ads.sql
+```
+
+**Важно:** Если используете другие параметры подключения (хост, порт, пользователь), измените их в `db/migrations.yml`.
+
+**Пояснение:**
+- `envsubst < migrations.yml` - подставляет переменные `${DB_HOST}`, `${DB_PORT}` и т.д. из окружения
+- `pgmigrate -c /dev/stdin` - читает конфиг из stdin (уже с подставленными значениями)
 
 ### Вариант 1: Использование yandex-pgmigrate (рекомендуется)
 
@@ -71,9 +98,13 @@ psql avito_moderation -f db/V002__seed_data.sql
 ## Проверка
 
 ```bash
+# Проверьте таблицы
+psql avito_moderation -c "\dt"
+
 # Проверьте структуру таблиц
 psql avito_moderation -c "\d sellers"
 psql avito_moderation -c "\d ads"
+psql avito_moderation -c "\d moderation_results"
 
 # Посмотрите данные
 psql avito_moderation -c "SELECT * FROM sellers;"
