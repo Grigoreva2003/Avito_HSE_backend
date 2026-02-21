@@ -10,6 +10,7 @@ from http import HTTPStatus
 
 from services.exceptions import AdNotFoundError, ModerationResultNotFoundError
 from services.async_moderation import AsyncModerationService
+from models.ads import ModerationResultResponse
 
 ITEM_ID = 100
 TASK_ID = 123
@@ -230,6 +231,66 @@ class TestModerationResultEndpoint:
             assert response.status_code == HTTPStatus.NOT_FOUND
             assert "не найдена" in response.json()["detail"].lower()
             mock_get_result.assert_awaited_once_with(99999)
+
+
+class TestAsyncModerationResultCaching:
+    """Тесты cache-first логики для получения async результата."""
+
+    @pytest.mark.asyncio
+    async def test_get_moderation_result_returns_cache_without_db_call(self):
+        fake_cached_result = ModerationResultResponse(
+            task_id=123,
+            status="completed",
+            is_violation=True,
+            probability=0.95,
+            error_message=None,
+        )
+
+        with patch("services.async_moderation.PredictionCacheStorage") as mock_cache_cls, \
+             patch("services.async_moderation.ModerationResultRepository") as mock_repo_cls:
+            mock_cache = AsyncMock()
+            mock_cache.get_moderation_result.return_value = fake_cached_result
+            mock_cache_cls.return_value = mock_cache
+
+            mock_repo = AsyncMock()
+            mock_repo_cls.return_value = mock_repo
+
+            service = AsyncModerationService()
+            result = await service.get_moderation_result(123)
+
+            assert result == fake_cached_result
+            mock_cache.get_moderation_result.assert_awaited_once_with(123)
+            mock_repo.get_by_id.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_moderation_result_reads_db_and_caches_on_miss(self):
+        fake_row = SimpleNamespace(
+            id=123,
+            status="completed",
+            is_violation=False,
+            probability=0.23,
+            error_message=None,
+        )
+
+        with patch("services.async_moderation.PredictionCacheStorage") as mock_cache_cls, \
+             patch("services.async_moderation.ModerationResultRepository") as mock_repo_cls:
+            mock_cache = AsyncMock()
+            mock_cache.get_moderation_result.return_value = None
+            mock_cache_cls.return_value = mock_cache
+
+            mock_repo = AsyncMock()
+            mock_repo.get_by_id.return_value = fake_row
+            mock_repo_cls.return_value = mock_repo
+
+            service = AsyncModerationService()
+            result = await service.get_moderation_result(123)
+
+            assert result.task_id == 123
+            assert result.status == "completed"
+            assert result.is_violation is False
+            assert result.probability == 0.23
+            mock_repo.get_by_id.assert_awaited_once_with(123)
+            mock_cache.set_moderation_result.assert_awaited_once()
 
 
 class TestModerationWorker:
