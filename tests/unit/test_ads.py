@@ -3,9 +3,10 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 from http import HTTPStatus
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 from ml import get_model_manager
 import numpy as np
+from services.exceptions import AdNotFoundError
 
 
 class TestSuccessfulPredictionViolation:
@@ -413,3 +414,30 @@ class TestSimplePredictValidation:
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
+
+
+class TestCloseAdEndpoint:
+    """Тесты для /close."""
+
+    def test_close_ad_success(self, app_client: TestClient):
+        with patch("routers.ads.ModerationService.close_ad", new_callable=AsyncMock) as mock_close:
+            response = app_client.post("/close", json={"item_id": 100})
+
+            assert response.status_code == HTTPStatus.OK
+            assert response.json() == {
+                "item_id": 100,
+                "status": "closed",
+                "message": "Ad successfully closed",
+            }
+            mock_close.assert_awaited_once_with(100)
+
+    def test_close_ad_not_found(self, app_client: TestClient):
+        with patch("routers.ads.ModerationService.close_ad", new_callable=AsyncMock) as mock_close:
+            mock_close.side_effect = AdNotFoundError("Объявление с ID 99999 не найдено")
+            response = app_client.post("/close", json={"item_id": 99999})
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+
+    def test_close_ad_validation_error(self, app_client: TestClient):
+        response = app_client.post("/close", json={"item_id": 0})
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

@@ -102,3 +102,33 @@ async def test_async_moderation_result_cache_set_and_get():
     assert cached is not None
     assert cached.task_id == 22
     assert cached.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_prediction_cache_delete_by_item_id():
+    storage = PredictionCacheStorage()
+    fake_redis = MagicMock()
+    fake_redis.delete = AsyncMock()
+    fake_client = MagicMock()
+    fake_client.is_started.return_value = True
+    fake_client.get_client.return_value = fake_redis
+
+    with patch("repositories.prediction_cache.get_redis_client", return_value=fake_client):
+        await storage.delete(100)
+
+    fake_redis.delete.assert_awaited_once_with("prediction:item:100")
+
+
+@pytest.mark.asyncio
+async def test_prediction_cache_delete_moderation_result_by_task_id():
+    storage = PredictionCacheStorage()
+    fake_redis = MagicMock()
+    fake_redis.delete = AsyncMock()
+    fake_client = MagicMock()
+    fake_client.is_started.return_value = True
+    fake_client.get_client.return_value = fake_redis
+
+    with patch("repositories.prediction_cache.get_redis_client", return_value=fake_client):
+        await storage.delete_moderation_result(22)
+
+    fake_redis.delete.assert_awaited_once_with("prediction:task:22")
