@@ -5,7 +5,8 @@ from models.ads import (
     PredictRequest,
     PredictResponse,
     AsyncPredictResponse,
-    ModerationResultResponse
+    ModerationResultResponse,
+    CloseAdResponse,
 )
 from services.moderation import ModerationService
 from services.async_moderation import AsyncModerationService
@@ -178,4 +179,33 @@ async def moderation_result(task_id: int) -> ModerationResultResponse:
         raise HTTPException(
             status_code=500,
             detail="Внутренняя ошибка сервера при получении результата модерации."
+        )
+
+
+@router.post("/close", response_model=CloseAdResponse)
+async def close_ad(request: PredictRequest) -> CloseAdResponse:
+    """
+    Закрыть объявление по item_id.
+
+    Удаляет объявление и связанные результаты предсказаний из PostgreSQL и Redis.
+    """
+    moderation_service = ModerationService()
+    try:
+        await moderation_service.close_ad(request.item_id)
+        return CloseAdResponse(
+            item_id=request.item_id,
+            status="closed",
+            message="Ad successfully closed",
+        )
+    except AdNotFoundError as e:
+        logger.warning(f"Объявление для закрытия не найдено: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Объявление с ID {request.item_id} не найдено."
+        )
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при закрытии объявления {request.item_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Внутренняя ошибка сервера при закрытии объявления."
         )

@@ -16,6 +16,7 @@ class Ad:
         description: str,
         category: int,
         images_qty: int,
+        is_closed: bool = False,
         created_at=None,
         updated_at=None,
         seller_is_verified: Optional[bool] = None
@@ -26,6 +27,7 @@ class Ad:
         self.description = description
         self.category = category
         self.images_qty = images_qty
+        self.is_closed = is_closed
         self.created_at = created_at
         self.updated_at = updated_at
         self.seller_is_verified = seller_is_verified
@@ -42,6 +44,7 @@ class Ad:
             description=record['description'],
             category=record['category'],
             images_qty=record['images_qty'],
+            is_closed=record.get('is_closed', False),
             created_at=record.get('created_at'),
             updated_at=record.get('updated_at'),
             seller_is_verified=record.get('seller_is_verified')
@@ -72,7 +75,7 @@ class AdRepository:
             query = """
                 SELECT 
                     a.id, a.seller_id, a.name, a.description, 
-                    a.category, a.images_qty, a.created_at, a.updated_at,
+                    a.category, a.images_qty, a.is_closed, a.created_at, a.updated_at,
                     s.is_verified as seller_is_verified
                 FROM ads a
                 JOIN sellers s ON a.seller_id = s.id
@@ -80,7 +83,7 @@ class AdRepository:
             """
         else:
             query = """
-                SELECT id, seller_id, name, description, category, images_qty, created_at, updated_at
+                SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
                 FROM ads
                 WHERE id = $1
             """
@@ -112,7 +115,7 @@ class AdRepository:
             list[Ad]: Список объявлений
         """
         query = """
-            SELECT id, seller_id, name, description, category, images_qty, created_at, updated_at
+            SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
             FROM ads
             WHERE seller_id = $1
             ORDER BY created_at DESC
@@ -140,7 +143,7 @@ class AdRepository:
             list[Ad]: Список объявлений
         """
         query = """
-            SELECT id, seller_id, name, description, category, images_qty, created_at, updated_at
+            SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
             FROM ads
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
@@ -179,7 +182,7 @@ class AdRepository:
         query = """
             INSERT INTO ads (seller_id, name, description, category, images_qty)
             VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, seller_id, name, description, category, images_qty, created_at, updated_at
+            RETURNING id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
         """
         
         try:
@@ -246,7 +249,7 @@ class AdRepository:
             UPDATE ads
             SET {', '.join(updates)}
             WHERE id = ${param_num}
-            RETURNING id, seller_id, name, description, category, images_qty, created_at, updated_at
+            RETURNING id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
         """
         
         try:

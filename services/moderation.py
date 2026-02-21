@@ -2,7 +2,7 @@ import logging
 from models.ads import AdRequest, PredictResponse
 from services.exceptions import ModelNotAvailableError, PredictionError, AdNotFoundError
 from ml import get_model_manager
-from repositories import AdRepository
+from repositories import AdRepository, ModerationResultRepository
 from repositories.prediction_cache import PredictionCacheStorage
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ class ModerationService:
         """Инициализация сервиса модерации"""
         self._model_manager = get_model_manager()
         self._ad_repository = AdRepository()
+        self._moderation_repository = ModerationResultRepository()
         self._prediction_cache = PredictionCacheStorage()
     
     def predict_violation(self, ad_data: AdRequest) -> PredictResponse:
@@ -145,3 +146,22 @@ class ModerationService:
         except Exception as e:
             logger.error(f"Ошибка при предсказании для item_id={item_id}: {e}", exc_info=True)
             raise PredictionError(f"Ошибка при обработке предсказания: {str(e)}") from e
+
+    async def close_ad(self, item_id: int) -> None:
+        """
+        Закрыть объявление: удалить объявление и связанные результаты модерации.
+        Также очистить кэш Redis для sync/async предсказаний.
+        """
+        ad = await self._ad_repository.get_by_id(item_id, include_seller=False)
+        if ad is None:
+            raise AdNotFoundError(f"Объявление с ID {item_id} не найдено")
+
+        task_ids = await self._moderation_repository.get_task_ids_by_item_id(item_id)
+        await self._moderation_repository.delete_by_item_id(item_id)
+        deleted = await self._ad_repository.delete(item_id)
+        if not deleted:
+            raise AdNotFoundError(f"Объявление с ID {item_id} не найдено")
+
+        await self._prediction_cache.delete(item_id)
+        for task_id in task_ids:
+            await self._prediction_cache.delete_moderation_result(task_id)

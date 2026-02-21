@@ -145,3 +145,42 @@ class ModerationResultRepository:
         
         await self._db.execute(query, task_id, error_message)
         logger.error(f"Модерация завершилась с ошибкой: task_id={task_id}, error={error_message}")
+
+    async def get_task_ids_by_item_id(self, item_id: int) -> list[int]:
+        """
+        Получить ID задач модерации по item_id.
+
+        Args:
+            item_id: ID объявления
+
+        Returns:
+            list[int]: Список task_id
+        """
+        query = """
+            SELECT id
+            FROM moderation_results
+            WHERE item_id = $1
+            ORDER BY id
+        """
+        rows = await self._db.fetch(query, item_id)
+        return [row["id"] for row in rows]
+
+    async def delete_by_item_id(self, item_id: int) -> int:
+        """
+        Удалить все результаты модерации по item_id.
+
+        Args:
+            item_id: ID объявления
+
+        Returns:
+            int: Количество удаленных записей
+        """
+        query = """
+            DELETE FROM moderation_results
+            WHERE item_id = $1
+            RETURNING id
+        """
+        rows = await self._db.fetch(query, item_id)
+        deleted_count = len(rows)
+        logger.info(f"Удалены результаты модерации: item_id={item_id}, deleted={deleted_count}")
+        return deleted_count

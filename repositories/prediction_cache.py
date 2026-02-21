@@ -67,6 +67,16 @@ class PredictionCacheStorage:
         except Exception as e:
             logger.warning(f"Не удалось записать кэш предсказания для item_id={item_id}: {e}")
 
+    async def delete(self, item_id: int) -> None:
+        """Удалить кэш предсказания по item_id."""
+        try:
+            redis_client = get_redis_client()
+            if not redis_client.is_started():
+                return
+            await redis_client.get_client().delete(self._sync_key(item_id))
+        except Exception as e:
+            logger.warning(f"Не удалось удалить кэш предсказания для item_id={item_id}: {e}")
+
     async def get_moderation_result(self, task_id: int) -> Optional[ModerationResultResponse]:
         """Получить результат асинхронной модерации из кэша по task_id."""
         try:
@@ -113,3 +123,13 @@ class PredictionCacheStorage:
             )
         except Exception as e:
             logger.warning(f"Не удалось записать кэш async результата для task_id={result.task_id}: {e}")
+
+    async def delete_moderation_result(self, task_id: int) -> None:
+        """Удалить кэш async результата по task_id."""
+        try:
+            redis_client = get_redis_client()
+            if not redis_client.is_started():
+                return
+            await redis_client.get_client().delete(self._async_key(task_id))
+        except Exception as e:
+            logger.warning(f"Не удалось удалить кэш async результата для task_id={task_id}: {e}")

@@ -44,3 +44,10 @@ class PredictResponse(BaseModel):
     """Модель ответа с предсказанием модели."""
     is_violation: bool = Field(..., description="Есть ли нарушение в объявлении")
     probability: float = Field(..., ge=0.0, le=1.0, description="Вероятность нарушения (от 0 до 1)")
+
+
+class CloseAdResponse(BaseModel):
+    """Модель ответа для закрытия объявления."""
+    item_id: int = Field(..., description="ID закрытого объявления")
+    status: str = Field(..., description="Статус операции")
+    message: str = Field(..., description="Сообщение о результате закрытия")
