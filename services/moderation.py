@@ -149,7 +149,7 @@ class ModerationService:
 
     async def close_ad(self, item_id: int) -> None:
         """
-        Закрыть объявление: удалить объявление и связанные результаты модерации.
+        Закрыть объявление: пометить объявление как закрытое и удалить связанные результаты модерации.
         Также очистить кэш Redis для sync/async предсказаний.
         """
         ad = await self._ad_repository.get_by_id(item_id, include_seller=False)
@@ -158,8 +158,8 @@ class ModerationService:
 
         task_ids = await self._moderation_repository.get_task_ids_by_item_id(item_id)
         await self._moderation_repository.delete_by_item_id(item_id)
-        deleted = await self._ad_repository.delete(item_id)
-        if not deleted:
+        closed = await self._ad_repository.close(item_id)
+        if not closed:
             raise AdNotFoundError(f"Объявление с ID {item_id} не найдено")
 
         await self._prediction_cache.delete(item_id)

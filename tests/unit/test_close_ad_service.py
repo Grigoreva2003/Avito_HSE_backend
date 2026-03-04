@@ -7,13 +7,13 @@ from services.moderation import ModerationService
 
 
 @pytest.mark.asyncio
-async def test_close_ad_deletes_postgres_and_redis_data():
+async def test_close_ad_marks_closed_and_cleans_related_data():
     with patch("services.moderation.AdRepository") as mock_ad_repo_cls, \
          patch("services.moderation.ModerationResultRepository") as mock_mod_repo_cls, \
          patch("services.moderation.PredictionCacheStorage") as mock_cache_cls:
         mock_ad_repo = AsyncMock()
         mock_ad_repo.get_by_id.return_value = object()
-        mock_ad_repo.delete.return_value = True
+        mock_ad_repo.close.return_value = True
         mock_ad_repo_cls.return_value = mock_ad_repo
 
         mock_mod_repo = AsyncMock()
@@ -30,7 +30,7 @@ async def test_close_ad_deletes_postgres_and_redis_data():
         mock_ad_repo.get_by_id.assert_awaited_once_with(100, include_seller=False)
         mock_mod_repo.get_task_ids_by_item_id.assert_awaited_once_with(100)
         mock_mod_repo.delete_by_item_id.assert_awaited_once_with(100)
-        mock_ad_repo.delete.assert_awaited_once_with(100)
+        mock_ad_repo.close.assert_awaited_once_with(100)
         mock_cache.delete.assert_awaited_once_with(100)
         assert mock_cache.delete_moderation_result.await_count == 2
         mock_cache.delete_moderation_result.assert_any_await(11)

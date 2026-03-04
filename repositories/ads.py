@@ -60,13 +60,19 @@ class AdRepository:
     def __init__(self):
         self.db = get_database()
     
-    async def get_by_id(self, ad_id: int, include_seller: bool = False) -> Optional[Ad]:
+    async def get_by_id(
+        self,
+        ad_id: int,
+        include_seller: bool = False,
+        include_closed: bool = False
+    ) -> Optional[Ad]:
         """
         Получить объявление по ID.
         
         Args:
             ad_id: ID объявления
             include_seller: Включить информацию о продавце
+            include_closed: Включать закрытые объявления
             
         Returns:
             Optional[Ad]: Объявление или None
@@ -80,16 +86,18 @@ class AdRepository:
                 FROM ads a
                 JOIN sellers s ON a.seller_id = s.id
                 WHERE a.id = $1
+                  AND ($2 OR a.is_closed = FALSE)
             """
         else:
             query = """
                 SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
                 FROM ads
                 WHERE id = $1
+                  AND ($2 OR is_closed = FALSE)
             """
         
         try:
-            record = await self.db.fetchrow(query, ad_id)
+            record = await self.db.fetchrow(query, ad_id, include_closed)
             ad = Ad.from_record(record)
             
             if ad:
@@ -102,7 +110,13 @@ class AdRepository:
             logger.error(f"Error fetching ad {ad_id}: {e}")
             raise
     
-    async def get_by_seller(self, seller_id: int, limit: int = 100, offset: int = 0) -> list[Ad]:
+    async def get_by_seller(
+        self,
+        seller_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        include_closed: bool = False
+    ) -> list[Ad]:
         """
         Получить объявления продавца.
         
@@ -110,6 +124,7 @@ class AdRepository:
             seller_id: ID продавца
             limit: Максимальное количество записей
             offset: Смещение
+            include_closed: Включать закрытые объявления
             
         Returns:
             list[Ad]: Список объявлений
@@ -118,12 +133,13 @@ class AdRepository:
             SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
             FROM ads
             WHERE seller_id = $1
+              AND ($4 OR is_closed = FALSE)
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
         """
         
         try:
-            records = await self.db.fetch(query, seller_id, limit, offset)
+            records = await self.db.fetch(query, seller_id, limit, offset, include_closed)
             ads = [Ad.from_record(record) for record in records]
             logger.debug(f"Found {len(ads)} ads for seller {seller_id}")
             return ads
@@ -131,13 +147,19 @@ class AdRepository:
             logger.error(f"Error fetching ads for seller {seller_id}: {e}")
             raise
     
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[Ad]:
+    async def get_all(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        include_closed: bool = False
+    ) -> list[Ad]:
         """
         Получить все объявления.
         
         Args:
             limit: Максимальное количество записей
             offset: Смещение
+            include_closed: Включать закрытые объявления
             
         Returns:
             list[Ad]: Список объявлений
@@ -145,12 +167,13 @@ class AdRepository:
         query = """
             SELECT id, seller_id, name, description, category, images_qty, is_closed, created_at, updated_at
             FROM ads
+            WHERE ($3 OR is_closed = FALSE)
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
         """
         
         try:
-            records = await self.db.fetch(query, limit, offset)
+            records = await self.db.fetch(query, limit, offset, include_closed)
             ads = [Ad.from_record(record) for record in records]
             logger.debug(f"Found {len(ads)} ads")
             return ads
@@ -284,4 +307,34 @@ class AdRepository:
             return deleted
         except Exception as e:
             logger.error(f"Error deleting ad {ad_id}: {e}")
+            raise
+
+    async def close(self, ad_id: int) -> bool:
+        """
+        Закрыть объявление (soft delete через is_closed = TRUE).
+
+        Args:
+            ad_id: ID объявления
+
+        Returns:
+            bool: True если объявление закрыто, False если не найдено
+        """
+        query = """
+            UPDATE ads
+            SET is_closed = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND is_closed = FALSE
+            RETURNING id
+        """
+        try:
+            row = await self.db.fetchrow(query, ad_id)
+            closed = row is not None
+            if closed:
+                logger.info(f"Closed ad: id={ad_id}")
+            else:
+                logger.debug(f"Ad not found or already closed: id={ad_id}")
+            return closed
+        except Exception as e:
+            logger.error(f"Error closing ad {ad_id}: {e}")
             raise
