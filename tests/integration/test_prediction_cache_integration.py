@@ -92,3 +92,41 @@ async def test_integration_async_moderation_cache_set_get_and_ttl(redis_cache_st
 
     ttl = await client.ttl(key)
     assert 0 < ttl <= storage.ASYNC_TTL_SECONDS
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_integration_sync_prediction_cache_delete(redis_cache_storage):
+    storage, client = redis_cache_storage
+    item_id = 3003
+    key = f"prediction:item:{item_id}"
+
+    await storage.set(item_id, PredictResponse(is_violation=False, probability=0.33))
+    assert await client.get(key) is not None
+
+    await storage.delete(item_id)
+
+    assert await client.get(key) is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_integration_async_moderation_cache_delete(redis_cache_storage):
+    storage, client = redis_cache_storage
+    task_id = 4004
+    key = f"prediction:task:{task_id}"
+
+    await storage.set_moderation_result(
+        ModerationResultResponse(
+            task_id=task_id,
+            status="completed",
+            is_violation=True,
+            probability=0.89,
+            error_message=None,
+        )
+    )
+    assert await client.get(key) is not None
+
+    await storage.delete_moderation_result(task_id)
+
+    assert await client.get(key) is None

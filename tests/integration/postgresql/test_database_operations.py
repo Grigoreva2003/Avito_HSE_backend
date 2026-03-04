@@ -96,3 +96,33 @@ class TestDatabaseOperations:
         """Тест получения несуществующего объявления."""
         ad = await ad_repository.get_by_id(999999)
         assert ad is None
+
+    async def test_close_ad_marks_is_closed(self, seller_repository, ad_repository):
+        """Тест закрытия объявления: is_closed=TRUE и скрытие из обычной выборки."""
+        seller = await seller_repository.create(
+            name="Seller for close test",
+            is_verified=True
+        )
+        ad = await ad_repository.create(
+            seller_id=seller.id,
+            name="Close me",
+            description="Ad will be closed",
+            category=2,
+            images_qty=1
+        )
+
+        closed = await ad_repository.close(ad.id)
+        assert closed is True
+
+        # Закрытое объявление по умолчанию не возвращается
+        assert await ad_repository.get_by_id(ad.id) is None
+
+        # Но должно быть доступно при include_closed=True
+        closed_ad = await ad_repository.get_by_id(ad.id, include_closed=True)
+        assert closed_ad is not None
+        assert closed_ad.id == ad.id
+        assert closed_ad.is_closed is True
+
+        # Очистка
+        await ad_repository.delete(ad.id)
+        await seller_repository.delete(seller.id)
