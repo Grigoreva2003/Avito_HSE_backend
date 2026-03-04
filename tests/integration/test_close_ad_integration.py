@@ -79,9 +79,15 @@ class TestCloseAdIntegration:
 
         await service.close_ad(ad.id)
 
+        # По умолчанию закрытые объявления не возвращаются
         assert await ad_repo.get_by_id(ad.id) is None
+        # Но запись должна оставаться в БД как закрытая
+        closed_ad = await ad_repo.get_by_id(ad.id, include_closed=True)
+        assert closed_ad is not None
+        assert closed_ad.is_closed is True
         assert await moderation_repo.get_by_id(moderation.id) is None
         assert await cache.get(ad.id) is None
         assert await cache.get_moderation_result(moderation.id) is None
 
+        await ad_repo.delete(ad.id)
         await seller_repo.delete(seller.id)
