@@ -2,6 +2,7 @@ import asyncpg
 import logging
 from typing import Optional
 from config import get_settings
+from app.metrics import observe_db_query_duration
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,13 @@ class Database:
             raise RuntimeError("Database pool is not initialized. Call connect() first.")
         return self._pool
 
+    @staticmethod
+    def _extract_query_type(query: str, default: str = "select") -> str:
+        first_token = query.strip().split(maxsplit=1)[0].lower() if query and query.strip() else default
+        if first_token in {"select", "insert", "update", "delete"}:
+            return first_token
+        return default
+
     async def execute(self, query: str, *args) -> str:
         """
         Выполняет SQL запрос (INSERT, UPDATE, DELETE).
@@ -81,8 +89,11 @@ class Database:
             str: Результат выполнения
         """
         pool = self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.execute(query, *args)
+        query_type = self._extract_query_type(query, default="update")
+        with observe_db_query_duration(query_type):
+            async with pool.acquire() as conn:
+                result = await conn.execute(query, *args)
+        return result
 
     async def fetch(self, query: str, *args) -> list:
         """
@@ -96,8 +107,11 @@ class Database:
             list: Список записей
         """
         pool = self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetch(query, *args)
+        query_type = self._extract_query_type(query)
+        with observe_db_query_duration(query_type):
+            async with pool.acquire() as conn:
+                result = await conn.fetch(query, *args)
+        return result
 
     async def fetchrow(self, query: str, *args) -> Optional[asyncpg.Record]:
         """
@@ -111,8 +125,11 @@ class Database:
             Optional[asyncpg.Record]: Запись или None
         """
         pool = self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchrow(query, *args)
+        query_type = self._extract_query_type(query)
+        with observe_db_query_duration(query_type):
+            async with pool.acquire() as conn:
+                result = await conn.fetchrow(query, *args)
+        return result
 
     async def fetchval(self, query: str, *args):
         """
@@ -126,8 +143,11 @@ class Database:
             Any: Значение первого столбца первой строки
         """
         pool = self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchval(query, *args)
+        query_type = self._extract_query_type(query)
+        with observe_db_query_duration(query_type):
+            async with pool.acquire() as conn:
+                result = await conn.fetchval(query, *args)
+        return result
 
 
 # Глобальная функция для получения экземпляра

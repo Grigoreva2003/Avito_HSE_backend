@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from starlette.responses import Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from routers.ads import router as ads_router
 import uvicorn
 import logging
 from ml import get_model_manager
 from database import get_database
 from app.clients import get_kafka_producer, get_redis_client
+from app.observability import PrometheusMiddleware
 from config import get_settings
 
 # Загружаем настройки
@@ -102,6 +105,7 @@ app = FastAPI(
     version=settings.app.app_version,
     lifespan=lifespan
 )
+app.add_middleware(PrometheusMiddleware)
 
 @app.get("/")
 async def root():
@@ -110,6 +114,11 @@ async def root():
         'service': settings.app.app_name,
         'version': settings.app.app_version
     }
+
+
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 app.include_router(ads_router, tags=["Ads"])

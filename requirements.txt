@@ -21,6 +21,9 @@ aiokafka>=0.10.0,<0.12.0
 # Кэширование
 redis>=5.0.0,<6.0.0
 
+# Метрики и observability
+prometheus-client>=0.20.0,<1.0.0
+
 # Тестирование
 pytest>=8.0.0,<9.0.0
 pytest-asyncio>=0.21.0,<0.24.0

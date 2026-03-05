@@ -4,6 +4,11 @@ from services.exceptions import ModelNotAvailableError, PredictionError, AdNotFo
 from ml import get_model_manager
 from repositories import AdRepository, ModerationResultRepository
 from repositories.prediction_cache import PredictionCacheStorage
+from app.metrics import (
+    observe_prediction_duration,
+    record_prediction_result,
+    record_prediction_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,31 @@ class ModerationService:
         self._ad_repository = AdRepository()
         self._moderation_repository = ModerationResultRepository()
         self._prediction_cache = PredictionCacheStorage()
+
+    def _ensure_model_available(self) -> None:
+        """Проверка доступности модели перед инференсом."""
+        if not self._model_manager.is_available():
+            logger.error("ML-модель не загружена")
+            raise ModelNotAvailableError("ML-модель недоступна")
+
+    def _predict_with_metrics(
+        self,
+        *,
+        is_verified_seller: bool,
+        images_qty: int,
+        description: str,
+        category: int,
+    ) -> tuple[bool, float]:
+        """Выполнить инференс модели с инкрементом бизнес-метрик."""
+        with observe_prediction_duration():
+            is_violation, probability = self._model_manager.predict(
+                is_verified_seller=is_verified_seller,
+                images_qty=images_qty,
+                description=description,
+                category=category,
+            )
+        record_prediction_result(is_violation, probability)
+        return is_violation, probability
     
     def predict_violation(self, ad_data: AdRequest) -> PredictResponse:
         """
@@ -44,18 +74,14 @@ class ModerationService:
             f"description_len={len(ad_data.description)}"
         )
         
-        # Проверка доступности модели
-        if not self._model_manager.is_available():
-            logger.error("ML-модель не загружена")
-            raise ModelNotAvailableError("ML-модель недоступна")
+        self._ensure_model_available()
         
         try:
-            # Предсказание через ModelManager (он сам нормализует признаки)
-            is_violation, probability = self._model_manager.predict(
+            is_violation, probability = self._predict_with_metrics(
                 is_verified_seller=ad_data.is_verified_seller,
                 images_qty=ad_data.images_qty,
                 description=ad_data.description,
-                category=ad_data.category
+                category=ad_data.category,
             )
             
             # Логирование результата
@@ -72,9 +98,11 @@ class ModerationService:
             
         except RuntimeError as e:
             # ModelManager выбрасывает RuntimeError если модель недоступна
+            record_prediction_error("model_unavailable")
             logger.error(f"Модель недоступна: {e}")
             raise ModelNotAvailableError(str(e)) from e
         except Exception as e:
+            record_prediction_error("prediction_error")
             logger.error(f"Ошибка при предсказании: {e}", exc_info=True)
             raise PredictionError(f"Ошибка при обработке предсказания: {str(e)}") from e
     
@@ -114,18 +142,14 @@ class ModerationService:
             f"images_qty={ad.images_qty}, category={ad.category}"
         )
         
-        # Проверяем что модель доступна
-        if not self._model_manager.is_available():
-            logger.error("ML-модель не загружена")
-            raise ModelNotAvailableError("ML-модель недоступна")
+        self._ensure_model_available()
         
         try:
-            # Делаем предсказание
-            is_violation, probability = self._model_manager.predict(
+            is_violation, probability = self._predict_with_metrics(
                 is_verified_seller=ad.seller_is_verified,
                 images_qty=ad.images_qty,
                 description=ad.description,
-                category=ad.category
+                category=ad.category,
             )
             
             logger.info(
@@ -141,9 +165,11 @@ class ModerationService:
             return response
         
         except RuntimeError as e:
+            record_prediction_error("model_unavailable")
             logger.error(f"Модель недоступна: {e}")
             raise ModelNotAvailableError(str(e)) from e
         except Exception as e:
+            record_prediction_error("prediction_error")
             logger.error(f"Ошибка при предсказании для item_id={item_id}: {e}", exc_info=True)
             raise PredictionError(f"Ошибка при обработке предсказания: {str(e)}") from e
 
