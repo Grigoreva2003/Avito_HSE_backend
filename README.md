@@ -29,7 +29,8 @@
 ├── main.py                         # Точка входа FastAPI
 ├── config.py                       # Настройки приложения
 ├── database.py                     # Подключение к PostgreSQL
-├── docker-compose.yml              # PostgreSQL + Redis + Redpanda + Console
+├── docker-compose.yml              # PostgreSQL + Redis + Redpanda + Prometheus + Grafana
+├── prometheus.yml                  # Конфиг scrape для Prometheus
 ├── pytest.ini                      # Маркеры тестов (integration)
 ├── ml/                             # ML слой
 │   ├── __init__.py
@@ -53,6 +54,10 @@
 │   │   ├── __init__.py
 │   │   ├── kafka.py                # Kafka Producer
 │   │   └── redis.py                # Redis client
+│   ├── observability/
+│   │   ├── __init__.py
+│   │   └── prometheus_middleware.pн # HTTP метрики и middleware
+│   ├── metrics.py                  # Бизнес-метрики сервиса
 │   └── workers/
 │       ├── __init__.py
 │       ├── moderation_worker.py    # Kafka Consumer (воркер)
@@ -133,7 +138,7 @@ EOF
 pip install -r requirements.txt
 ```
 
-### 5. Запустите инфраструктуру в Docker (PostgreSQL + Redis + Kafka)
+### 5. Запустите инфраструктуру в Docker (PostgreSQL + Redis + Kafka + Prometheus + Grafana)
 
 ```bash
 # Запустить все сервисы
@@ -148,6 +153,8 @@ docker-compose ps
 - Redis: `localhost:6379`
 - Kafka (Redpanda): `localhost:9092`
 - Web Console: http://localhost:8080
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (login: `admin`, password: `admin`)
 
 Если нужен только Redis (например, для проверки кэша):
 ```bash
@@ -329,10 +336,10 @@ print(ad.seller_is_verified)  # True
 #### POST /close
 Закрыть объявление по `item_id`.
 
-Метод удаляет:
-- объявление из PostgreSQL,
-- связанные записи `moderation_results` из PostgreSQL,
-- кэш предсказания по `item_id` и кэш async-результатов по `task_id` из Redis.
+Метод выполняет soft-close:
+- помечает объявление как `is_closed = TRUE` в PostgreSQL,
+- удаляет связанные записи `moderation_results` из PostgreSQL,
+- очищает кэш предсказания по `item_id` и кэш async-результатов по `task_id` из Redis.
 
 **Запрос:**
 ```json
@@ -445,5 +452,44 @@ curl http://localhost:8003/moderation_result/1
 
 ## Мониторинг и отладка
 
-Раздел мониторинга Kafka/DLQ и диагностические сценарии вынесены в:
+### Observability: Prometheus + Grafana
+
+В сервис добавлена базовая и бизнес-инструментация:
+
+- HTTP-метрики через кастомный middleware:
+  - `http_requests_total{method, endpoint, status}`
+  - `http_request_duration_seconds{method, endpoint}`
+- Метрики ML и БД:
+  - `predictions_total{result}`
+  - `prediction_duration_seconds`
+  - `prediction_errors_total{error_type}`
+  - `model_prediction_probability`
+  - `db_query_duration_seconds{query_type}`
+
+Эндпоинт экспорта метрик: `GET /metrics`
+
+### Настройка Prometheus
+
+Файл `prometheus.yml` в корне проекта:
+
+```yaml
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "moderation-service"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["host.docker.internal:8003"]
+```
+
+Если приложение запущено в Docker, используйте `targets: ["<app_service_name>:<port>"]`.
+
+### Минимальный дашборд Grafana (6 панелей)
+
+Запросы для тестрования осуществляла через `curl`
+
+![Grafana dashboard](imgs/graphana_dash.png)
+
+Раздел мониторинга Kafka/DLQ и диагностические сценарии по воркерам вынесены в:
 [`app/workers/README.md`](app/workers/README.md)
