@@ -13,7 +13,7 @@ def app_client() -> TestClient:
     model_manager = get_model_manager()
     if not model_manager.is_available():
         model_manager.load_model("model.pkl")
-
+    
     mock_db = MagicMock()
     mock_db.connect = AsyncMock()
     mock_db.disconnect = AsyncMock()

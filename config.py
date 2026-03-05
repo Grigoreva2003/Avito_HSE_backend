@@ -109,6 +109,23 @@ class RedisSettings(BaseSettings):
         return f"{scheme}://{auth_part}{self.host}:{self.port}/{self.db}"
 
 
+class SentrySettings(BaseSettings):
+    """Настройки Sentry"""
+
+    dsn: str = Field(default="", description="Sentry DSN")
+    traces_sample_rate: float = Field(default=1.0, description="Доля трейсинга (0..1)")
+    environment: str = Field(default="development", description="Окружение для Sentry")
+    enabled: bool = Field(default=False, description="Включить отправку ошибок в Sentry")
+
+    model_config = SettingsConfigDict(
+        env_prefix="SENTRY_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
+
 class Settings:
     """Глобальные настройки приложения"""
 
@@ -118,6 +135,7 @@ class Settings:
         self.ml = MLSettings()
         self.kafka = KafkaSettings()
         self.redis = RedisSettings()
+        self.sentry = SentrySettings()
 
 
 # Глобальный экземпляр настроек (синглтон)

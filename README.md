@@ -122,6 +122,11 @@ APP_LOG_LEVEL=INFO
 
 ML_MODEL_PATH=model.pkl
 ML_MODEL_VERSION=1.0.0
+
+SENTRY_ENABLED=false
+SENTRY_DSN=
+SENTRY_TRACES_SAMPLE_RATE=1.0
+SENTRY_ENVIRONMENT=development
 EOF
 ```
 
@@ -192,11 +197,14 @@ python3.11 -m app.workers.moderation_worker
 
 ### Структура конфигурации
 
-| Группа           | Префикс | Описание                                    |
-|------------------|---------|---------------------------------------------|
-| DatabaseSettings | `DB_*`  | Параметры подключения к PostgreSQL          |
-| AppSettings      | `APP_*` | Настройки приложения (порт, хост, логи)     |
-| MLSettings       | `ML_*`  | Настройки ML-модели (путь к файлу модели)   |
+| Группа           | Префикс    | Описание                                    |
+|------------------|------------|---------------------------------------------|
+| DatabaseSettings | `DB_*      | Параметры подключения к PostgreSQL          |
+| AppSettings      | `APP_*`    | Настройки приложения (порт, хост, логи)     |
+| MLSettings       | `ML_*`     | Настройки ML-модели (путь к файлу модели)   |
+| RedisSettings    | `REDIS_*`  | Настройки Redis-кэша                        |
+| KafkaSettings    | `KAFKA_*`  | Настройки Kafka/Redpanda                    |
+| SentrySettings   | `SENTRY_*` | Настройки Sentry (ошибки и трассировка)     |
 
 **Примечание для macOS:** PostgreSQL по умолчанию использует имя текущего пользователя системы. Узнайте его командой `whoami` и используйте в `DB_USER`. Пароль обычно не требуется для локальной разработки (оставьте `DB_PASSWORD` пустым).
 
@@ -467,6 +475,38 @@ curl http://localhost:8003/moderation_result/1
   - `db_query_duration_seconds{query_type}`
 
 Эндпоинт экспорта метрик: `GET /metrics`
+
+### Error tracking: Sentry
+
+Sentry подключен для сбора исключений в HTTP-обработчиках и бизнес-логике.
+
+1. Установите зависимости:
+```bash
+pip install -r requirements.txt
+```
+
+2. Укажите настройки в `.env`:
+```env
+SENTRY_ENABLED=true
+SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project_id>
+SENTRY_TRACES_SAMPLE_RATE=1.0
+SENTRY_ENVIRONMENT=development
+```
+
+3. Перезапустите сервис и спровоцируйте ошибку (например, запрос к несуществующему `item_id`):
+```bash
+curl -X POST http://localhost:8003/simple_predict \
+  -H "Content-Type: application/json" \
+  -d '{"item_id": 999999}'
+```
+
+Исключения (`ModelNotAvailableError`, `PredictionError`, `AdNotFoundError`,
+`ModerationResultNotFoundError` и неожиданные ошибки) отправляются в Sentry через
+`sentry_sdk.capture_exception(...)`.
+
+### Скриншот Sentry с исключением
+Очень долго скачивался локальный образ sentry, в итоге с кучей ошибок не удалось его полностью поднять (смогла запустить `podman-compose build web`)...
+![Sentry fail](imgs/sentry_error.png)
 
 ### Настройка Prometheus
 

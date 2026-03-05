@@ -10,9 +10,18 @@ from database import get_database
 from app.clients import get_kafka_producer, get_redis_client
 from app.observability import PrometheusMiddleware
 from config import get_settings
+import sentry_sdk
 
 # Загружаем настройки
 settings = get_settings()
+
+# Инициализация Sentry (только если явно включен и указан DSN)
+if settings.sentry.enabled and settings.sentry.dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry.dsn,
+        traces_sample_rate=settings.sentry.traces_sample_rate,
+        environment=settings.sentry.environment,
+    )
 
 # Настройка логирования из конфига
 logging.basicConfig(

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 import logging
+import sentry_sdk
 from models.ads import (
     AdRequest,
     PredictRequest,
@@ -37,18 +38,21 @@ async def predict(ad_data: AdRequest) -> PredictResponse:
     try:
         return moderation_service.predict_violation(ad_data)
     except ModelNotAvailableError as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Модель недоступна: {e}")
         raise HTTPException(
             status_code=503,
             detail="ML-модель недоступна. Сервис временно не может обрабатывать запросы."
         )
     except PredictionError as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Ошибка предсказания: {e}")
         raise HTTPException(
             status_code=500,
             detail="Внутренняя ошибка сервера при обработке предсказания."
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Неожиданная ошибка: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -87,12 +91,14 @@ async def async_predict(request: PredictRequest) -> AsyncPredictResponse:
         )
 
     except AdNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         logger.warning(f"Объявление не найдено: {e}")
         raise HTTPException(
             status_code=404,
             detail=f"Объявление с ID {request.item_id} не найдено."
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Неожиданная ошибка при async_predict: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -122,24 +128,28 @@ async def simple_predict(request: PredictRequest) -> PredictResponse:
     try:
         return await moderation_service.predict_violation_by_item_id(request.item_id)
     except AdNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         logger.warning(f"Объявление не найдено: {e}")
         raise HTTPException(
             status_code=404,
             detail=f"Объявление с ID {request.item_id} не найдено"
         )
     except ModelNotAvailableError as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Модель недоступна: {e}")
         raise HTTPException(
             status_code=503,
             detail="ML-модель недоступна. Сервис временно не может обрабатывать запросы."
         )
     except PredictionError as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Ошибка предсказания: {e}")
         raise HTTPException(
             status_code=500,
             detail="Внутренняя ошибка сервера при обработке предсказания."
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Неожиданная ошибка: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -169,12 +179,14 @@ async def moderation_result(task_id: int) -> ModerationResultResponse:
     try:
         return await async_service.get_moderation_result(task_id)
     except ModerationResultNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         logger.warning(f"Задача модерации не найдена: {e}")
         raise HTTPException(
             status_code=404,
             detail=f"Задача модерации с ID {task_id} не найдена."
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Неожиданная ошибка при moderation_result/{task_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -198,12 +210,14 @@ async def close_ad(request: PredictRequest) -> CloseAdResponse:
             message="Ad successfully closed",
         )
     except AdNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         logger.warning(f"Объявление для закрытия не найдено: {e}")
         raise HTTPException(
             status_code=404,
             detail=f"Объявление с ID {request.item_id} не найдено."
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Неожиданная ошибка при закрытии объявления {request.item_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
