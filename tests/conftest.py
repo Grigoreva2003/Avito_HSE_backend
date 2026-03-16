@@ -4,6 +4,12 @@ from main import app
 from ml import get_model_manager
 from repositories import SellerRepository, AdRepository
 from unittest.mock import AsyncMock, MagicMock, patch
+from repositories.accounts import Account
+from services.auth import get_current_account
+
+
+def _mock_current_account() -> Account:
+    return Account(id=1, login="test-user", password="hashed", is_blocked=False)
 
 
 @pytest.fixture
@@ -14,6 +20,40 @@ def app_client() -> TestClient:
     if not model_manager.is_available():
         model_manager.load_model("model.pkl")
     
+    mock_db = MagicMock()
+    mock_db.connect = AsyncMock()
+    mock_db.disconnect = AsyncMock()
+
+    mock_kafka = MagicMock()
+    mock_kafka.start = AsyncMock()
+    mock_kafka.stop = AsyncMock()
+    mock_kafka.is_started.return_value = True
+    mock_kafka.send_moderation_request = AsyncMock()
+
+    mock_redis = MagicMock()
+    mock_redis.start = AsyncMock()
+    mock_redis.stop = AsyncMock()
+    mock_redis.is_started.return_value = True
+    mock_redis.get_client.return_value = MagicMock()
+
+    with patch("main.get_database", return_value=mock_db), \
+         patch("main.get_kafka_producer", return_value=mock_kafka), \
+         patch("main.get_redis_client", return_value=mock_redis), \
+         patch("app.clients.get_kafka_producer", return_value=mock_kafka), \
+         patch("services.async_moderation.get_kafka_producer", return_value=mock_kafka):
+        app.dependency_overrides[get_current_account] = _mock_current_account
+        with TestClient(app) as client:
+            yield client
+        app.dependency_overrides.pop(get_current_account, None)
+
+
+@pytest.fixture
+def app_client_no_auth_override() -> TestClient:
+    """Клиент без override авторизации (для тестов /login и проверки auth)."""
+    model_manager = get_model_manager()
+    if not model_manager.is_available():
+        model_manager.load_model("model.pkl")
+
     mock_db = MagicMock()
     mock_db.connect = AsyncMock()
     mock_db.disconnect = AsyncMock()

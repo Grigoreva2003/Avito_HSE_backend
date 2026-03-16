@@ -123,6 +123,11 @@ APP_LOG_LEVEL=INFO
 ML_MODEL_PATH=model.pkl
 ML_MODEL_VERSION=1.0.0
 
+JWT_SECRET_KEY=change-me-in-production
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+JWT_COOKIE_NAME=access_token
+
 SENTRY_ENABLED=false
 SENTRY_DSN=
 SENTRY_TRACES_SAMPLE_RATE=1.0
@@ -199,11 +204,12 @@ python3.11 -m app.workers.moderation_worker
 
 | Группа           | Префикс    | Описание                                    |
 |------------------|------------|---------------------------------------------|
-| DatabaseSettings | `DB_*      | Параметры подключения к PostgreSQL          |
+| DatabaseSettings | `DB_*`     | Параметры подключения к PostgreSQL          |
 | AppSettings      | `APP_*`    | Настройки приложения (порт, хост, логи)     |
 | MLSettings       | `ML_*`     | Настройки ML-модели (путь к файлу модели)   |
 | RedisSettings    | `REDIS_*`  | Настройки Redis-кэша                        |
 | KafkaSettings    | `KAFKA_*`  | Настройки Kafka/Redpanda                    |
+| JWTSettings      | `JWT_*`    | Настройки JWT и cookie авторизации          |
 | SentrySettings   | `SENTRY_*` | Настройки Sentry (ошибки и трассировка)     |
 
 **Примечание для macOS:** PostgreSQL по умолчанию использует имя текущего пользователя системы. Узнайте его командой `whoami` и используйте в `DB_USER`. Пароль обычно не требуется для локальной разработки (оставьте `DB_PASSWORD` пустым).
@@ -257,6 +263,41 @@ print(ad.seller_is_verified)  # True
 
 ## API
 
+### Авторизация
+
+Перед вызовом ручек модерации нужно пройти логин: сервис выдает JWT и кладет его
+в httpOnly cookie `access_token`. Проверка выполняется dependency
+`get_current_account`, которая возвращает модель аккаунта.
+
+#### POST /login
+Авторизация пользователя по `login` и `password`.
+
+**Запрос:**
+```json
+{
+  "login": "demo-user",
+  "password": "demo-password"
+}
+```
+
+**Ответ (200 OK):**
+```json
+{
+  "account_id": 1,
+  "message": "Login successful"
+}
+```
+
+**Коды ответов:**
+- `200` - Успешная авторизация, cookie с JWT установлена
+- `401` - Неверный логин/пароль
+- `403` - Аккаунт заблокирован
+- `422` - Ошибка валидации
+- `500` - Внутренняя ошибка
+
+Ручка `/login` публичная. Ручки предсказаний защищены и требуют cookie с JWT:
+`/predict`, `/simple_predict`, `/async_predict`, `/moderation_result/{task_id}`, `/close`.
+
 ### Синхронные эндпоинты
 
 #### POST /predict
@@ -285,6 +326,7 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Успешное предсказание
+- `401` - Требуется авторизация
 - `422` - Ошибка валидации входных данных
 - `503` - ML-модель недоступна
 - `500` - Внутренняя ошибка сервера
@@ -309,6 +351,7 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Успешное предсказание
+- `401` - Требуется авторизация
 - `404` - Объявление не найдено
 - `422` - Ошибка валидации входных данных
 - `503` - ML-модель недоступна
@@ -337,6 +380,7 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Задача принята
+- `401` - Требуется авторизация
 - `404` - Объявление не найдено
 - `422` - Ошибка валидации
 - `500` - Внутренняя ошибка
@@ -367,6 +411,7 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Объявление успешно закрыто
+- `401` - Требуется авторизация
 - `404` - Объявление не найдено
 - `422` - Ошибка валидации
 - `500` - Внутренняя ошибка
@@ -407,6 +452,7 @@ print(ad.seller_is_verified)  # True
 
 **Коды ответов:**
 - `200` - Результат получен
+- `401` - Требуется авторизация
 - `404` - Задача не найдена
 - `500` - Внутренняя ошибка
 
@@ -418,6 +464,22 @@ print(ad.seller_is_verified)  # True
 - Запуск и структура тестов: [`tests/README.md`](tests/README.md)
 
 ## Примеры использования
+
+### Логин и использование cookie JWT
+
+```bash
+# 1. Логин (cookie сохранится в файл cookies.txt)
+curl -X POST http://localhost:8003/login \
+  -H "Content-Type: application/json" \
+  -d '{"login":"demo-user","password":"demo-password"}' \
+  -c cookies.txt
+
+# 2. Вызов защищенной ручки с этой cookie
+curl -X POST http://localhost:8003/simple_predict \
+  -H "Content-Type: application/json" \
+  -d '{"item_id": 100}' \
+  -b cookies.txt
+```
 
 ### Синхронная модерация
 

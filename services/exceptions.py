@@ -21,3 +21,18 @@ class AdNotFoundError(ServiceException):
 class ModerationResultNotFoundError(ServiceException):
     """Исключение, когда задача модерации не найдена"""
     pass
+
+
+class InvalidCredentialsError(ServiceException):
+    """Неверный логин или пароль"""
+    pass
+
+
+class AccountBlockedError(ServiceException):
+    """Аккаунт заблокирован"""
+    pass
+
+
+class AuthenticationRequiredError(ServiceException):
+    """Требуется авторизация"""
+    pass

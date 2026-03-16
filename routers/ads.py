@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 import logging
 import sentry_sdk
 from models.ads import (
@@ -9,16 +9,58 @@ from models.ads import (
     ModerationResultResponse,
     CloseAdResponse,
 )
+from models.auth import LoginRequest, LoginResponse
+from repositories.accounts import Account
 from services.moderation import ModerationService
 from services.async_moderation import AsyncModerationService
-from services.exceptions import ModelNotAvailableError, PredictionError, AdNotFoundError, ModerationResultNotFoundError
+from services.auth import AuthService, get_current_account
+from services.exceptions import (
+    ModelNotAvailableError,
+    PredictionError,
+    AdNotFoundError,
+    ModerationResultNotFoundError,
+    InvalidCredentialsError,
+    AccountBlockedError,
+)
+from config import get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(request: LoginRequest, response: Response) -> LoginResponse:
+    auth_service = AuthService()
+    try:
+        account = await auth_service.authenticate(request.login, request.password)
+        token = auth_service.create_access_token(account.id)
+        response.set_cookie(
+            key=settings.jwt.cookie_name,
+            value=token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=settings.jwt.access_token_expire_minutes * 60,
+        )
+        return LoginResponse(account_id=account.id, message="Login successful")
+    except InvalidCredentialsError as e:
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=401, detail="Invalid login or password")
+    except AccountBlockedError as e:
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=403, detail="Account is blocked")
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        logger.error(f"Неожиданная ошибка при login: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/predict", response_model=PredictResponse)
-async def predict(ad_data: AdRequest) -> PredictResponse:
+async def predict(
+    ad_data: AdRequest,
+    _current_account: Account = Depends(get_current_account),
+) -> PredictResponse:
     """
     Предсказать наличие нарушения в объявлении с использованием ML-модели.
 
@@ -61,7 +103,10 @@ async def predict(ad_data: AdRequest) -> PredictResponse:
 
 
 @router.post("/async_predict", response_model=AsyncPredictResponse)
-async def async_predict(request: PredictRequest) -> AsyncPredictResponse:
+async def async_predict(
+    request: PredictRequest,
+    _current_account: Account = Depends(get_current_account),
+) -> AsyncPredictResponse:
     """
     Отправить запрос на асинхронную модерацию объявления.
 
@@ -107,7 +152,10 @@ async def async_predict(request: PredictRequest) -> AsyncPredictResponse:
 
 
 @router.post("/simple_predict", response_model=PredictResponse)
-async def simple_predict(request: PredictRequest) -> PredictResponse:
+async def simple_predict(
+    request: PredictRequest,
+    _current_account: Account = Depends(get_current_account),
+) -> PredictResponse:
     """
     Предсказать наличие нарушения в объявлении по item_id.
     Данные объявления получаются из БД.
@@ -158,7 +206,10 @@ async def simple_predict(request: PredictRequest) -> PredictResponse:
 
 
 @router.get("/moderation_result/{task_id}", response_model=ModerationResultResponse)
-async def moderation_result(task_id: int) -> ModerationResultResponse:
+async def moderation_result(
+    task_id: int,
+    _current_account: Account = Depends(get_current_account),
+) -> ModerationResultResponse:
     """
     Получить результат асинхронной модерации по task_id.
     
@@ -195,7 +246,10 @@ async def moderation_result(task_id: int) -> ModerationResultResponse:
 
 
 @router.post("/close", response_model=CloseAdResponse)
-async def close_ad(request: PredictRequest) -> CloseAdResponse:
+async def close_ad(
+    request: PredictRequest,
+    _current_account: Account = Depends(get_current_account),
+) -> CloseAdResponse:
     """
     Закрыть объявление по item_id.
 

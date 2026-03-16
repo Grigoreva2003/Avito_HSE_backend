@@ -109,6 +109,23 @@ class RedisSettings(BaseSettings):
         return f"{scheme}://{auth_part}{self.host}:{self.port}/{self.db}"
 
 
+class JWTSettings(BaseSettings):
+    """Настройки JWT авторизации"""
+
+    secret_key: str = Field(default="change-me-in-production", description="JWT secret key")
+    algorithm: str = Field(default="HS256", description="JWT algorithm")
+    access_token_expire_minutes: int = Field(default=60, description="Access token TTL in minutes")
+    cookie_name: str = Field(default="access_token", description="Cookie name for JWT token")
+
+    model_config = SettingsConfigDict(
+        env_prefix="JWT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
+
 class SentrySettings(BaseSettings):
     """Настройки Sentry"""
 
@@ -135,6 +152,7 @@ class Settings:
         self.ml = MLSettings()
         self.kafka = KafkaSettings()
         self.redis = RedisSettings()
+        self.jwt = JWTSettings()
         self.sentry = SentrySettings()
 
 
