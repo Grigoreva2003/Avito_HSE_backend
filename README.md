@@ -7,6 +7,15 @@
 ## Описание проекта
 Сервис модерации объявлений с использованием ML-модели (LogisticRegression) для предсказания нарушений. 
 
+## Навигация
+
+- [Быстрый старт](#быстрый-старт)
+- [Конфигурация](#конфигурация-)
+- [API и авторизация](#api)
+- [Примеры использования](#примеры-использования)
+- [Наблюдаемость](#наблюдаемость-prometheus-grafana-sentry)
+- [Документация по компонентам](#документация-по-компонентам)
+
 ## Документация по компонентам
 
 - Тесты и сценарии запуска: [`tests/README.md`](tests/README.md)
@@ -36,15 +45,18 @@
 │   ├── __init__.py
 │   └── model_manager.py            # ModelManager - работа с ML-моделью
 ├── models/                         # Pydantic модели
-│   └── ads.py                      # Модели запросов/ответов
+│   ├── ads.py                      # Модели запросов/ответов модерации
+│   └── auth.py                     # Модели запросов/ответов авторизации
 ├── routers/                        # HTTP слой
 │   └── ads.py                      # Эндпоинты API
 ├── services/                       # Бизнес-логика
 │   ├── exceptions.py               # Доменные исключения
 │   ├── moderation.py               # Синхронная модерация
-│   └── async_moderation.py         # Асинхронная модерация
+│   ├── async_moderation.py         # Асинхронная модерация
+│   └── auth.py                     # JWT авторизация
 ├── repositories/                   # Data Access Layer
 │   ├── __init__.py
+│   ├── accounts.py                 # CRUD для аккаунтов
 │   ├── sellers.py                  # CRUD для продавцов
 │   ├── ads.py                      # CRUD для объявлений
 │   ├── moderation_results.py       # CRUD для результатов модерации
@@ -56,7 +68,7 @@
 │   │   └── redis.py                # Redis client
 │   ├── observability/
 │   │   ├── __init__.py
-│   │   └── prometheus_middleware.pн # HTTP метрики и middleware
+│   │   └── prometheus_middleware.py # HTTP метрики и middleware
 │   ├── metrics.py                  # Бизнес-метрики сервиса
 │   └── workers/
 │       ├── __init__.py
@@ -67,7 +79,8 @@
 │   │   ├── V001__initial_schema.sql
 │   │   ├── V002__seed_data.sql
 │   │   ├── V003__moderation_results.sql
-│   │   └── V004__add_is_closed_to_ads.sql
+│   │   ├── V004__add_is_closed_to_ads.sql
+│   │   └── V005__create_account_table.sql
 │   ├── README.md
 │   └── migrations.yml
 ├── tests/
@@ -79,7 +92,7 @@
 └── requirements.txt                # Зависимости Python
 ```
 
-## Установка и запуск
+## Быстрый старт
 
 ### 1. Создайте и активируйте виртуальное окружение
 ```bash
@@ -148,7 +161,7 @@ EOF
 pip install -r requirements.txt
 ```
 
-### 5. Запустите инфраструктуру в Docker (PostgreSQL + Redis + Kafka + Prometheus + Grafana)
+### 5. Запустите инфраструктуру в Docker/Podman (PostgreSQL + Redis + Kafka + Prometheus + Grafana)
 
 ```bash
 # Запустить все сервисы
@@ -520,9 +533,9 @@ curl http://localhost:8003/moderation_result/1
 # После обработки: {"status": "completed", "is_violation": false, ...}
 ```
 
-## Мониторинг и отладка
+## Наблюдаемость (Prometheus, Grafana, Sentry)
 
-### Observability: Prometheus + Grafana
+### Метрики Prometheus и дашборды Grafana
 
 В сервис добавлена базовая и бизнес-инструментация:
 
@@ -538,7 +551,7 @@ curl http://localhost:8003/moderation_result/1
 
 Эндпоинт экспорта метрик: `GET /metrics`
 
-### Error tracking: Sentry
+### Error tracking в Sentry
 
 Sentry подключен для сбора исключений в HTTP-обработчиках и бизнес-логике.
 
@@ -567,7 +580,7 @@ curl -X POST http://localhost:8003/simple_predict \
 `sentry_sdk.capture_exception(...)`.
 
 ### Скриншот Sentry с исключением
-Очень долго скачивался локальный образ sentry, в итоге с кучей ошибок не удалось его полностью поднять (смогла запустить `podman-compose build web`)...
+Пример проблемы с локальным self-hosted запуском Sentry через Podman:
 ![Sentry fail](imgs/sentry_error.png)
 
 ### Настройка Prometheus
@@ -589,9 +602,9 @@ scrape_configs:
 
 ### Минимальный дашборд Grafana (6 панелей)
 
-Запросы для тестрования осуществляла через `curl`
+Запросы для тестирования выполнялись через `curl`.
 
 ![Grafana dashboard](imgs/graphana_dash.png)
 
-Раздел мониторинга Kafka/DLQ и диагностические сценарии по воркерам вынесены в:
+Мониторинг Kafka/DLQ и диагностические сценарии по воркерам вынесены в:
 [`app/workers/README.md`](app/workers/README.md)
